@@ -4162,6 +4162,7 @@ static int ast_rtp_dtmf_begin(struct ast_rtp_instance *instance, char digit)
 	int hdrlen = 12, res = 0, i = 0, payload = 101;
 	char data[256];
 	unsigned int *rtpheader = (unsigned int*)data;
+	char orig_digit = digit;
 
 	ast_rtp_instance_get_remote_address(instance, &remote_address);
 
@@ -4204,6 +4205,9 @@ static int ast_rtp_dtmf_begin(struct ast_rtp_instance *instance, char digit)
 		int ice;
 
 		rtpheader[3] = htonl((digit << 24) | (0xa << 16) | (rtp->send_duration));
+		ast_log(LOG_DEBUG, "AVOXI: ast_rtp_dtmf_begin: %c dur=%d %s (type %-2.2d, seq %-6.6d, ts %-6.6u, len %-6.6d)\n",
+				rtp->send_payload, rtp->seqno, rtp->lastdigitts, res - hdrlen,
+				orig_digit, rtp->send_duration, ast_sockaddr_stringify(&remote_address));
 		res = rtp_sendto(instance, (void *) rtpheader, hdrlen + 4, 0, &remote_address, &ice);
 		if (res < 0) {
 			ast_log(LOG_ERROR, "RTP Transmission error to %s: %s\n",
@@ -4219,6 +4223,8 @@ static int ast_rtp_dtmf_begin(struct ast_rtp_instance *instance, char digit)
 		rtp->seqno++;
 		rtp->send_duration += 160;
 		rtpheader[0] = htonl((2 << 30) | (payload << 16) | (rtp->seqno));
+		// AVOXI: Don't retry if successfully sent
+		break;
 	}
 
 	/* Record that we are in the process of sending a digit and information needed to continue doing so */
@@ -4238,6 +4244,13 @@ static int ast_rtp_dtmf_continuation(struct ast_rtp_instance *instance)
 	char data[256];
 	unsigned int *rtpheader = (unsigned int*)data;
 	int ice;
+
+	if (rtp->send_duration > 320) {
+		ast_log(LOG_DEBUG, "AVOXI: ast_rtp_dtmf_continuation: Sent enough dtmf events, muting the rest. "
+						   "(type %-2.2d, seq %-6.6d, ts %-6.6u, len %-6.6d)\n",
+						   rtp->send_payload, rtp->seqno, rtp->lastdigitts, res - hdrlen);
+		return 0;
+	}
 
 	ast_rtp_instance_get_remote_address(instance, &remote_address);
 
@@ -4321,6 +4334,10 @@ static int ast_rtp_dtmf_end_with_duration(struct ast_rtp_instance *instance, cha
 	rtpheader[2] = htonl(rtp->ssrc);
 	rtpheader[3] = htonl((digit << 24) | (0xa << 16) | (rtp->send_duration));
 	rtpheader[3] |= htonl((1 << 23));
+
+	ast_log(LOG_DEBUG, "AVOXI: ast_rtp_dtmf_end_with_duration: Finalizing. "
+					   "(type %-2.2d, seq %-6.6d, ts %-6.6u, len %-6.6d)\n",
+			rtp->send_payload, rtp->seqno, rtp->lastdigitts, res - hdrlen);
 
 	/* Send it 3 times, that's the magical number */
 	for (i = 0; i < 3; i++) {
