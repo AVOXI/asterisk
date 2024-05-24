@@ -3883,16 +3883,17 @@ static struct ast_frame *__ast_read(struct ast_channel *chan, int dropaudio, int
 			}
 			break;
 		case AST_FRAME_DTMF_END:
-			send_dtmf_end_event(chan, DTMF_RECEIVED, f->subclass.integer, f->len);
 			ast_log(LOG_DTMF, "DTMF end '%c' received on %s, duration %ld ms\n", f->subclass.integer, ast_channel_name(chan), f->len);
 			/* Queue it up if DTMF is deferred, or if DTMF emulation is forced. */
 			if (ast_test_flag(ast_channel_flags(chan), AST_FLAG_DEFER_DTMF) || ast_test_flag(ast_channel_flags(chan), AST_FLAG_EMULATE_DTMF)) {
+				send_dtmf_end_event(chan, DTMF_RECEIVED, f->subclass.integer, f->len);
 				queue_dtmf_readq(chan, f);
 				ast_frfree(f);
 				f = &ast_null_frame;
 			} else if (!ast_test_flag(ast_channel_flags(chan), AST_FLAG_IN_DTMF | AST_FLAG_END_DTMF_ONLY)) {
 				if (!ast_tvzero(*ast_channel_dtmf_tv(chan)) &&
 				    ast_tvdiff_ms(ast_tvnow(), *ast_channel_dtmf_tv(chan)) < AST_MIN_DTMF_GAP) {
+					send_dtmf_end_event(chan, DTMF_RECEIVED, f->subclass.integer, f->len);
 					/* If it hasn't been long enough, defer this digit */
 					queue_dtmf_readq(chan, f);
 					ast_frfree(f);
@@ -3913,6 +3914,7 @@ static struct ast_frame *__ast_read(struct ast_channel *chan, int dropaudio, int
 						ast_frfree(old_frame);
 				}
 			} else {
+				send_dtmf_end_event(chan, DTMF_RECEIVED, f->subclass.integer, f->len);
 				struct timeval now = ast_tvnow();
 				if (ast_test_flag(ast_channel_flags(chan), AST_FLAG_IN_DTMF)) {
 					ast_log(LOG_DTMF, "DTMF end accepted with begin '%c' on %s\n", f->subclass.integer, ast_channel_name(chan));
