@@ -3979,7 +3979,6 @@ static struct ast_frame *__ast_read(struct ast_channel *chan, int dropaudio, int
 			}
 			break;
 		case AST_FRAME_DTMF_BEGIN:
-			send_dtmf_begin_event(chan, DTMF_RECEIVED, f->subclass.integer);
 			ast_log(LOG_DTMF, "DTMF begin '%c' received on %s\n", f->subclass.integer, ast_channel_name(chan));
 			if (ast_test_flag(ast_channel_flags(chan), AST_FLAG_DEFER_DTMF | AST_FLAG_END_DTMF_ONLY | AST_FLAG_EMULATE_DTMF) ||
 			    (!ast_tvzero(*ast_channel_dtmf_tv(chan)) &&
@@ -3988,6 +3987,7 @@ static struct ast_frame *__ast_read(struct ast_channel *chan, int dropaudio, int
 				ast_frfree(f);
 				f = &ast_null_frame;
 			} else {
+				send_dtmf_begin_event(chan, DTMF_RECEIVED, f->subclass.integer);
 				struct timeval now = ast_tvnow();
 				ast_set_flag(ast_channel_flags(chan), AST_FLAG_IN_DTMF);
 				ast_channel_dtmf_tv_set(chan, &now);
