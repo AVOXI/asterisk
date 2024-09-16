@@ -176,10 +176,33 @@ static int jb_helper(struct ast_channel *chan, const char *cmd, char *data, cons
 	return 0;
 }
 
+static int jb_read(struct ast_channel *chan, const char *cmd, char *data, char *buf, size_t len)
+{
+    struct ast_jb_conf jb_conf;
+
+    if (!chan) {
+        ast_log(LOG_WARNING, "No channel was provided to %s function.\n", cmd);
+        return -1;
+    }
+
+    ast_jb_get_config(chan, &jb_conf);
+
+    ast_log(LOG_WARNING, "Jitterbuffer config: type=%s, max_size=%ld, resync_threshold=%ld, target_extra=%ld\n",
+        jb_conf.impl, jb_conf.max_size, jb_conf.resync_threshold, jb_conf.target_extra);
+
+    snprintf(buf, len, "type=%s, max_size=%ld, resync_threshold=%ld, target_extra=%ld",
+        jb_conf.impl,
+        jb_conf.max_size,
+        jb_conf.resync_threshold,
+        jb_conf.target_extra);
+
+    return 0;
+}
 
 static struct ast_custom_function jb_function = {
 	.name = "JITTERBUFFER",
 	.write = jb_helper,
+    .read = jb_read,
 };
 
 static int unload_module(void)
