@@ -451,6 +451,7 @@ struct ast_rtp {
 	struct ast_data_buffer *recv_buffer;		/*!< Buffer for storing received packets for retransmission */
 
 	struct rtp_transport_wide_cc_statistics transport_wide_cc; /*!< Transport-cc statistics information */
+    unsigned long int avoxi_tick_last_tx;
 
 #ifdef HAVE_PJPROJECT
 	ast_cond_t cond;            /*!< ICE/TURN condition for signaling */
@@ -4938,6 +4939,12 @@ static void put_unaligned_time24(void *p, uint32_t time_msw, uint32_t time_lsw)
 	cp[2] = datum;
 }
 
+unsigned long int get_tick_us() {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
 /*! \pre instance is locked */
 static int rtp_raw_write(struct ast_rtp_instance *instance, struct ast_frame *frame, int codec)
 {
@@ -5123,7 +5130,26 @@ static int rtp_raw_write(struct ast_rtp_instance *instance, struct ast_frame *fr
 			}
 		}
 
-		res = rtp_sendto(instance, (void *)rtpheader, packet_len, 0, &remote_address, &ice);
+        char correlation_info[512];
+        snprintf(correlation_info, sizeof(correlation_info), "chan=%s ssrc=%08x remote=%s ", ast_rtp_instance_get_channel_id(instance), rtp->ssrc, ast_sockaddr_stringify(&remote_address));
+
+        unsigned long int tick_pre_send = get_tick_us();
+        res = rtp_sendto(instance, (void *)rtpheader, packet_len, 0, &remote_address, &ice);
+        unsigned long int tick_post_send = get_tick_us();
+        if (rtp->avoxi_tick_last_tx == 0) {
+            ast_log(LOG_WARNING, "AVOXI: GAP: [%s] Initialized\n", correlation_info);
+            rtp->avoxi_tick_last_tx = tick_pre_send;
+        } else {
+            if (tick_pre_send - rtp->avoxi_tick_last_tx >= 400000) {
+                ast_log(LOG_WARNING, "AVOXI: GAP: STUTTER [%s] delta=%lu send_dur=%lu "
+                                            "codec=%-2.2d seq=%-6.6d ts=%-6.6u len=%-6.6d\n",
+                               correlation_info, tick_pre_send - rtp->avoxi_tick_last_tx, tick_post_send - tick_pre_send,
+                               codec, rtp->seqno, rtp->lastts, res - hdrlen);
+            } else {
+                ast_debug_rtp(1, "AVOXI: GAP: [%s] delta=%lu send_dur=%lu\n", correlation_info, tick_pre_send - rtp->avoxi_tick_last_tx, tick_post_send - tick_pre_send);
+            }
+            rtp->avoxi_tick_last_tx = tick_pre_send;
+        }
 		if (res < 0) {
 			if (!ast_rtp_instance_get_prop(instance, AST_RTP_PROPERTY_NAT) || (ast_rtp_instance_get_prop(instance, AST_RTP_PROPERTY_NAT) && (ast_test_flag(rtp, FLAG_NAT_ACTIVE) == FLAG_NAT_ACTIVE))) {
 				ast_debug_rtp(1, "(%p) RTP transmission error of packet %d to %s: %s\n",
