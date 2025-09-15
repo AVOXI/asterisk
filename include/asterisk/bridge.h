@@ -946,7 +946,7 @@ int ast_bridge_queue_everyone_else(struct ast_bridge *bridge, struct ast_bridge_
  *
  * \retval Number of frames purged
  */
-int ast_avoxi_bridge_channel_purge_queue(struct ast_bridge_channel *bridge_channel, enum ast_frame_type frame_type_filter);
+int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_channel, enum ast_frame_type frame_type_filter);
 
 /*!
  * \brief Purge all buffered packets from all channels in a bridge
@@ -957,7 +957,7 @@ int ast_avoxi_bridge_channel_purge_queue(struct ast_bridge_channel *bridge_chann
  *
  * \retval Total number of frames purged across all channels
  */
-int ast_avoxi_bridge_channel_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter);
+int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter);
 
 /*!
  * \brief Adjust the internal mixing sample rate of a bridge

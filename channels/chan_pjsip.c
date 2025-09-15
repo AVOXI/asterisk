@@ -702,7 +702,7 @@ static int answer(void *data)
 
 	/* Purge any buffered packets from the bridge before answering */
 	if (session->channel && (bridge = ast_channel_get_bridge(session->channel))) {
-		purged_count = ast_avoxi_bridge_channel_purge_all_queues(bridge, 0); /* 0 = all frame types */
+		purged_count = ast_bridge_channel_avoxi_purge_all_queues(bridge, 0); /* 0 = all frame types */
 		if (purged_count > 0) {
 			ast_log(LOG_DEBUG, "Purged %d buffered packets from bridge %s before answering channel %s\n",
 				purged_count, bridge->uniqueid, ast_channel_name(session->channel));
