@@ -1192,6 +1192,78 @@ int ast_channel_avoxi_purge_read_queue(struct ast_channel *chan, enum ast_frame_
 }
 
 /*!
+ * \brief Purge all buffered packets from a channel including jitter buffers and tech private data
+ * \since 18.0.0
+ *
+ * \param chan The channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_channel_avoxi_purge_all_buffers(struct ast_channel *chan, enum ast_frame_type frame_type_filter)
+{
+	struct ast_frame *fr;
+	int purged_count = 0;
+	struct ast_jb *jb;
+
+	if (!chan) {
+		return 0;
+	}
+
+	ast_channel_lock(chan);
+
+	/* Purge frames from the read queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(ast_channel_readq(chan), fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			ast_frfree(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Purge jitter buffer if it exists */
+	jb = ast_channel_jb(chan);
+	if (jb && ast_test_flag(jb, JB_CREATED)) {
+		const struct ast_jb_impl *jbimpl = jb->impl;
+		void *jbobj = jb->jbobj;
+		struct ast_frame *f;
+
+		/* Remove and free all frames still queued in jitter buffer */
+		while (jbimpl && jbobj && jbimpl->remove(jbobj, &f) == AST_JB_IMPL_OK) {
+			if (frame_type_filter == 0 || f->frametype == frame_type_filter) {
+				ast_frfree(f);
+				purged_count++;
+			} else {
+				ast_frfree(f);
+			}
+		}
+	}
+
+	/* Purge translation buffers if they exist */
+	if (ast_channel_writetrans(chan)) {
+		/* Note: Translation buffers are typically internal to the translator
+		 * and don't expose a direct purge interface. The translator will
+		 * handle its own buffering internally. */
+		ast_debug(1, "Channel %s has write translation buffer (not directly purgeable)\n", ast_channel_name(chan));
+	}
+	if (ast_channel_readtrans(chan)) {
+		/* Note: Translation buffers are typically internal to the translator
+		 * and don't expose a direct purge interface. The translator will
+		 * handle its own buffering internally. */
+		ast_debug(1, "Channel %s has read translation buffer (not directly purgeable)\n", ast_channel_name(chan));
+	}
+
+	/* Also flush the alert pipe to clear any pending alerts */
+	ast_channel_internal_alert_flush(chan);
+
+	ast_channel_unlock(chan);
+
+	return purged_count;
+}
+
+/*!
  * \brief Purge all buffered packets from all channels in a bridge
  * \since 18.0.0
  *
@@ -1219,12 +1291,12 @@ int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum as
 			bridge_purged = true;
 		}
 		
-		/* Purge actual channel read queue */
+		/* Purge actual channel including all buffers */
 		chan = ast_bridge_channel_get_chan(bridge_channel);
 		if (chan) {
 			ast_log(LOG_DEBUG, "AVOXI: Purging channel %s on bridge %s\n", ast_channel_name(chan), bridge->uniqueid);
 			int channel_purged = 0;
-			channel_purged += ast_channel_avoxi_purge_read_queue(chan, frame_type_filter);
+			channel_purged += ast_channel_avoxi_purge_all_buffers(chan, frame_type_filter);
 			total_purged += channel_purged;
 			ast_log(LOG_DEBUG, "AVOXI: Purged channel %s on bridge %s. Purged %d frames\n", ast_channel_name(chan), bridge->uniqueid, channel_purged);
 			ao2_ref(chan, -1);
