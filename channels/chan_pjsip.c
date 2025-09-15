@@ -63,6 +63,7 @@
 #include "asterisk/pickup.h"
 #include "asterisk/test.h"
 #include "asterisk/message.h"
+#include "asterisk/bridge.h"
 
 #include "asterisk/res_pjsip.h"
 #include "asterisk/res_pjsip_session.h"
