@@ -63,6 +63,8 @@
 #include "asterisk/pickup.h"
 #include "asterisk/test.h"
 #include "asterisk/message.h"
+#include "asterisk/bridge.h"
+#include "asterisk/bridge_channel.h"
 
 #include "asterisk/res_pjsip.h"
 #include "asterisk/res_pjsip_session.h"
@@ -686,6 +688,8 @@ static int answer(void *data)
 	pj_status_t status = PJ_SUCCESS;
 	pjsip_tx_data *packet = NULL;
 	struct ast_sip_session *session = ans_data->session;
+	struct ast_bridge *bridge;
+	int purged_count = 0;
 	SCOPE_ENTER_TASK(1, ans_data->indent, "%s\n", ast_sip_session_get_name(session));
 
 	if (session->inv_session->state == PJSIP_INV_STATE_DISCONNECTED) {
@@ -693,6 +697,17 @@ static int answer(void *data)
 			session->inv_session->cause,
 			pjsip_get_status_text(session->inv_session->cause)->ptr);
 		SCOPE_EXIT_RTN_VALUE(0, "Disconnected\n");
+	}
+
+	/* Purge any buffered packets from the bridge before answering */
+	if (session->channel && (bridge = ast_channel_get_bridge(session->channel))) {
+		ast_log(LOG_DEBUG, "AVOXI: Purge before answering patch applied. Bridge: %s\n", bridge->uniqueid);
+		purged_count = ast_bridge_channel_avoxi_purge_all_queues(bridge, 0); /* 0 = all frame types */
+		if (purged_count > 0) {
+			ast_log(LOG_DEBUG, "AVOXI:Purged %d buffered packets from bridge %s before answering channel %s\n",
+				purged_count, bridge->uniqueid, ast_channel_name(session->channel));
+		}
+		ao2_ref(bridge, -1);
 	}
 
 	pjsip_dlg_inc_lock(session->inv_session->dlg);
@@ -857,7 +872,7 @@ static struct ast_frame *chan_pjsip_read_stream(struct ast_channel *ast)
 	callback_state = AST_VECTOR_GET_ADDR(&session->active_media_state->read_callbacks, fdno);
 
 	if (ast_avoxi_purge_packets(ast)) {
-		ast_log(LOG_DEBUG, "AVOXI: chan_pjsip_read_stream(): Purge flag is set Ch=%s ChSt: %d",
+		ast_log(LOG_DEBUG, "AVOXI: CBARRY test - chan_pjsip_read_stream(): Purge flag is set Ch=%s ChSt: %d",
 				ast_channel_name(ast), ast_channel_state(ast));
 
 		int drop_count = 0;

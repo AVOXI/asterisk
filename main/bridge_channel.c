@@ -33,6 +33,7 @@
 #include "asterisk.h"
 
 #include <signal.h>
+#include <stdbool.h>
 
 #include "asterisk/heap.h"
 #include "asterisk/alertpipe.h"
@@ -1099,6 +1100,210 @@ int ast_bridge_queue_everyone_else(struct ast_bridge *bridge, struct ast_bridge_
 		}
 	}
 	return not_written;
+}
+
+/*!
+ * \brief Purge all buffered packets from a bridge channel's write and deferred queues
+ * \since 18.0.0
+ *
+ * \param bridge_channel The bridge channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_channel, enum ast_frame_type frame_type_filter)
+{
+	struct ast_frame *fr;
+	int purged_count = 0;
+
+	if (!bridge_channel) {
+		return 0;
+	}
+
+	ast_bridge_channel_lock(bridge_channel);
+
+	/* Purge frames from the write queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(&bridge_channel->wr_queue, fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			bridge_frame_free(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Purge frames from the deferred queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(&bridge_channel->deferred_queue, fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			ast_frfree(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Also flush the alert pipe to clear any pending alerts */
+	ast_alertpipe_flush(bridge_channel->alert_pipe);
+
+	ast_bridge_channel_unlock(bridge_channel);
+
+	return purged_count;
+}
+
+/*!
+ * \brief Purge all buffered packets from a channel's read queue
+ * \since 18.0.0
+ *
+ * \param chan The channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_channel_avoxi_purge_read_queue(struct ast_channel *chan, enum ast_frame_type frame_type_filter)
+{
+	struct ast_frame *fr;
+	int purged_count = 0;
+
+	if (!chan) {
+		return 0;
+	}
+
+	ast_channel_lock(chan);
+
+	/* Purge frames from the read queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(ast_channel_readq(chan), fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			ast_frfree(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Also flush the alert pipe to clear any pending alerts */
+	ast_channel_internal_alert_flush(chan);
+
+	ast_channel_unlock(chan);
+
+	return purged_count;
+}
+
+/*!
+ * \brief Purge all buffered packets from a channel including jitter buffers and tech private data
+ * \since 18.0.0
+ *
+ * \param chan The channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_channel_avoxi_purge_all_buffers(struct ast_channel *chan, enum ast_frame_type frame_type_filter)
+{
+	struct ast_frame *fr;
+	int purged_count = 0;
+	struct ast_jb *jb;
+
+	if (!chan) {
+		return 0;
+	}
+
+	ast_channel_lock(chan);
+
+	/* Purge frames from the read queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(ast_channel_readq(chan), fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			ast_frfree(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Purge jitter buffer if it exists and is active */
+	jb = ast_channel_jb(chan);
+	if (jb && jb->impl && jb->jbobj) {
+		const struct ast_jb_impl *jbimpl = jb->impl;
+		void *jbobj = jb->jbobj;
+		struct ast_frame *f;
+
+		/* Remove and free all frames still queued in jitter buffer */
+		while (jbimpl && jbobj && jbimpl->remove(jbobj, &f) == AST_JB_IMPL_OK) {
+			if (frame_type_filter == 0 || f->frametype == frame_type_filter) {
+				ast_frfree(f);
+				purged_count++;
+			} else {
+				ast_frfree(f);
+			}
+		}
+	}
+
+	/* Purge translation buffers if they exist */
+	if (ast_channel_writetrans(chan)) {
+		/* Note: Translation buffers are typically internal to the translator
+		 * and don't expose a direct purge interface. The translator will
+		 * handle its own buffering internally. */
+		ast_debug(1, "Channel %s has write translation buffer (not directly purgeable)\n", ast_channel_name(chan));
+	}
+	if (ast_channel_readtrans(chan)) {
+		/* Note: Translation buffers are typically internal to the translator
+		 * and don't expose a direct purge interface. The translator will
+		 * handle its own buffering internally. */
+		ast_debug(1, "Channel %s has read translation buffer (not directly purgeable)\n", ast_channel_name(chan));
+	}
+
+	/* Also flush the alert pipe to clear any pending alerts */
+	ast_channel_internal_alert_flush(chan);
+
+	ast_channel_unlock(chan);
+
+	return purged_count;
+}
+
+/*!
+ * \brief Purge all buffered packets from all channels in a bridge
+ * \since 18.0.0
+ *
+ * \param bridge The bridge to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Total number of frames purged across all channels
+ */
+int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter)
+{
+	struct ast_bridge_channel *bridge_channel;
+	struct ast_channel *chan;
+	int total_purged = 0;
+
+	if (!bridge) {
+		return 0;
+	}
+
+	bool bridge_purged = false;
+	AST_LIST_TRAVERSE(&bridge->channels, bridge_channel, entry) {
+		if (!bridge_purged) {
+			/* Purge bridge channel write queue */
+			total_purged += ast_bridge_channel_avoxi_purge_queue(bridge_channel, frame_type_filter);
+			ast_log(LOG_DEBUG, "AVOXI: Purged bridge channel %s. Purged %d frames\n", bridge->uniqueid, total_purged);
+			bridge_purged = true;
+		}
+		
+		/* Purge actual channel including all buffers */
+		chan = ast_bridge_channel_get_chan(bridge_channel);
+		if (chan) {
+			ast_log(LOG_DEBUG, "AVOXI: Purging channel %s on bridge %s\n", ast_channel_name(chan), bridge->uniqueid);
+			int channel_purged = 0;
+			channel_purged += ast_channel_avoxi_purge_all_buffers(chan, frame_type_filter);
+			total_purged += channel_purged;
+			ast_log(LOG_DEBUG, "AVOXI: Purged channel %s on bridge %s. Purged %d frames\n", ast_channel_name(chan), bridge->uniqueid, channel_purged);
+			ao2_ref(chan, -1);
+		}
+	}
+
+	return total_purged;
 }
 
 int ast_bridge_channel_queue_control_data(struct ast_bridge_channel *bridge_channel, enum ast_control_frame_type control, const void *data, size_t datalen)
