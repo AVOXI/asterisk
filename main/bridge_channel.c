@@ -1102,7 +1102,7 @@ int ast_bridge_queue_everyone_else(struct ast_bridge *bridge, struct ast_bridge_
 }
 
 /*!
- * \brief Purge all buffered packets from a bridge channel's write queue
+ * \brief Purge all buffered packets from a bridge channel's write and deferred queues
  * \since 18.0.0
  *
  * \param bridge_channel The bridge channel to purge packets from
@@ -1127,6 +1127,17 @@ int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_chann
 		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
 			AST_LIST_REMOVE_CURRENT(frame_list);
 			bridge_frame_free(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Purge frames from the deferred queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(&bridge_channel->deferred_queue, fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			ast_frfree(fr);
 			purged_count++;
 		}
 	}
@@ -1198,16 +1209,23 @@ int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum as
 		return 0;
 	}
 
+	bool bridge_purged = false;
 	AST_LIST_TRAVERSE(&bridge->channels, bridge_channel, entry) {
-		ast_log(LOG_DEBUG, "AVOXI: Purging bridge channel %s\n", bridge->uniqueid);
-		/* Purge bridge channel write queue */
-		total_purged += ast_bridge_channel_avoxi_purge_queue(bridge_channel, frame_type_filter);
+		if (!bridge_purged) {
+			/* Purge bridge channel write queue */
+			total_purged += ast_bridge_channel_avoxi_purge_queue(bridge_channel, frame_type_filter);
+			ast_log(LOG_DEBUG, "AVOXI: Purged bridge channel %s. Purged %d frames\n", bridge->uniqueid, total_purged);
+			bridge_purged = true;
+		}
 		
 		/* Purge actual channel read queue */
 		chan = ast_bridge_channel_get_chan(bridge_channel);
 		if (chan) {
 			ast_log(LOG_DEBUG, "AVOXI: Purging channel %s on bridge %s\n", ast_channel_name(chan), bridge->uniqueid);
-			total_purged += ast_channel_avoxi_purge_read_queue(chan, frame_type_filter);
+			int channel_purged = 0;
+			channel_purged += ast_channel_avoxi_purge_read_queue(chan, frame_type_filter);
+			total_purged += channel_purged;
+			ast_log(LOG_DEBUG, "AVOXI: Purged channel %s on bridge %s. Purged %d frames\n", ast_channel_name(chan), bridge->uniqueid, channel_purged);
 			ao2_ref(chan, -1);
 		}
 	}

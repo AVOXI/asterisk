@@ -733,7 +733,7 @@ void ast_bridge_channel_stream_map(struct ast_bridge_channel *bridge_channel);
 
 
 /*!
- * \brief Purge all buffered packets from a bridge channel's write queue
+ * \brief Purge all buffered packets from a bridge channel's write and deferred queues
  * \since 18.0.0
  *
  * \param bridge_channel The bridge channel to purge packets from
