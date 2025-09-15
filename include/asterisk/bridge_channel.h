@@ -744,6 +744,17 @@ void ast_bridge_channel_stream_map(struct ast_bridge_channel *bridge_channel);
 int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_channel, enum ast_frame_type frame_type_filter);
 
 /*!
+ * \brief Purge all buffered packets from a channel's read queue
+ * \since 18.0.0
+ *
+ * \param chan The channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_channel_avoxi_purge_read_queue(struct ast_channel *chan, enum ast_frame_type frame_type_filter);
+
+/*!
  * \brief Purge all buffered packets from all channels in a bridge
  * \since 18.0.0
  *

@@ -1141,6 +1141,45 @@ int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_chann
 }
 
 /*!
+ * \brief Purge all buffered packets from a channel's read queue
+ * \since 18.0.0
+ *
+ * \param chan The channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_channel_avoxi_purge_read_queue(struct ast_channel *chan, enum ast_frame_type frame_type_filter)
+{
+	struct ast_frame *fr;
+	int purged_count = 0;
+
+	if (!chan) {
+		return 0;
+	}
+
+	ast_channel_lock(chan);
+
+	/* Purge frames from the read queue */
+	AST_LIST_TRAVERSE_SAFE_BEGIN(ast_channel_readq(chan), fr, frame_list) {
+		/* If no filter specified or frame type matches filter */
+		if (frame_type_filter == 0 || fr->frametype == frame_type_filter) {
+			AST_LIST_REMOVE_CURRENT(frame_list);
+			ast_frfree(fr);
+			purged_count++;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	/* Also flush the alert pipe to clear any pending alerts */
+	ast_channel_internal_alert_flush(chan);
+
+	ast_channel_unlock(chan);
+
+	return purged_count;
+}
+
+/*!
  * \brief Purge all buffered packets from all channels in a bridge
  * \since 18.0.0
  *
@@ -1152,6 +1191,7 @@ int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_chann
 int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter)
 {
 	struct ast_bridge_channel *bridge_channel;
+	struct ast_channel *chan;
 	int total_purged = 0;
 
 	if (!bridge) {
@@ -1159,7 +1199,15 @@ int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum as
 	}
 
 	AST_LIST_TRAVERSE(&bridge->channels, bridge_channel, entry) {
+		/* Purge bridge channel write queue */
 		total_purged += ast_bridge_channel_avoxi_purge_queue(bridge_channel, frame_type_filter);
+		
+		/* Purge actual channel read queue */
+		chan = ast_bridge_channel_get_chan(bridge_channel);
+		if (chan) {
+			total_purged += ast_channel_avoxi_purge_read_queue(chan, frame_type_filter);
+			ao2_ref(chan, -1);
+		}
 	}
 
 	return total_purged;

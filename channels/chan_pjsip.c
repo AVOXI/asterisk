@@ -705,7 +705,7 @@ static int answer(void *data)
 	if (session->channel && (bridge = ast_channel_get_bridge(session->channel))) {
 		purged_count = ast_bridge_channel_avoxi_purge_all_queues(bridge, 0); /* 0 = all frame types */
 		if (purged_count > 0) {
-			ast_log(LOG_DEBUG, "Purged %d buffered packets from bridge %s before answering channel %s\n",
+			ast_log(LOG_DEBUG, "AVOXI:Purged %d buffered packets from bridge %s before answering channel %s\n",
 				purged_count, bridge->uniqueid, ast_channel_name(session->channel));
 		}
 		ao2_ref(bridge, -1);
