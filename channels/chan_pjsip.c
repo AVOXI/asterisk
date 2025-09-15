@@ -871,7 +871,7 @@ static struct ast_frame *chan_pjsip_read_stream(struct ast_channel *ast)
 	callback_state = AST_VECTOR_GET_ADDR(&session->active_media_state->read_callbacks, fdno);
 
 	if (ast_avoxi_purge_packets(ast)) {
-		ast_log(LOG_DEBUG, "AVOXI: chan_pjsip_read_stream(): Purge flag is set Ch=%s ChSt: %d",
+		ast_log(LOG_DEBUG, "AVOXI: CBARRY test - chan_pjsip_read_stream(): Purge flag is set Ch=%s ChSt: %d",
 				ast_channel_name(ast), ast_channel_state(ast));
 
 		int drop_count = 0;
