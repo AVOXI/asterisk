@@ -731,6 +731,30 @@ void ast_bridge_channel_feature_digit(struct ast_bridge_channel *bridge_channel,
  */
 void ast_bridge_channel_stream_map(struct ast_bridge_channel *bridge_channel);
 
+
+/*!
+ * \brief Purge all buffered packets from a bridge channel's write queue
+ * \since 18.0.0
+ *
+ * \param bridge_channel The bridge channel to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Number of frames purged
+ */
+int ast_bridge_channel_avoxi_purge_queue(struct ast_bridge_channel *bridge_channel, enum ast_frame_type frame_type_filter);
+
+/*!
+ * \brief Purge all buffered packets from all channels in a bridge
+ * \since 18.0.0
+ *
+ * \param bridge The bridge to purge packets from
+ * \param frame_type_filter Optional frame type to filter by (0 for all types)
+ *
+ * \retval Total number of frames purged across all channels
+ */
+int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter);
+
+
 #if defined(__cplusplus) || defined(c_plusplus)
 }
 #endif
