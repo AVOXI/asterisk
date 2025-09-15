@@ -1149,7 +1149,7 @@ int ast_avoxi_bridge_channel_purge_queue(struct ast_bridge_channel *bridge_chann
  *
  * \retval Total number of frames purged across all channels
  */
-int ast_avoxi_bridge_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter)
+int ast_avoxi_bridge_channel_purge_all_queues(struct ast_bridge *bridge, enum ast_frame_type frame_type_filter)
 {
 	struct ast_bridge_channel *bridge_channel;
 	int total_purged = 0;
