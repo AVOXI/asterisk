@@ -692,7 +692,7 @@ static int answer(void *data)
 	int purged_count = 0;
 	SCOPE_ENTER_TASK(1, ans_data->indent, "%s\n", ast_sip_session_get_name(session));
 
-	ast_log(LOG_DEBUG, "AVOXI: Purge before answering patch applied\n");
+	ast_log(LOG_DEBUG, "AVOXI: Purge before answering patch applied. Bridge: %s\n", bridge->uniqueid);
 
 	if (session->inv_session->state == PJSIP_INV_STATE_DISCONNECTED) {
 		ast_log(LOG_ERROR, "Session already DISCONNECTED [reason=%d (%s)]\n",
