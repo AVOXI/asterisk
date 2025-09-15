@@ -1199,7 +1199,7 @@ int ast_bridge_channel_avoxi_purge_all_queues(struct ast_bridge *bridge, enum as
 	}
 
 	AST_LIST_TRAVERSE(&bridge->channels, bridge_channel, entry) {
-		ast_log(LOG_DEBUG, "AVOXI: Purging bridge channel %s\n", ast_bridge_channel_get_name(bridge_channel));
+		ast_log(LOG_DEBUG, "AVOXI: Purging bridge channel %s\n", ast_channel_name(bridge_channel->chan));
 		/* Purge bridge channel write queue */
 		total_purged += ast_bridge_channel_avoxi_purge_queue(bridge_channel, frame_type_filter);
 		
