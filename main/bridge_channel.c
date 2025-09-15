@@ -33,6 +33,7 @@
 #include "asterisk.h"
 
 #include <signal.h>
+#include <stdbool.h>
 
 #include "asterisk/heap.h"
 #include "asterisk/alertpipe.h"
