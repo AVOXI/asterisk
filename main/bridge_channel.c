@@ -1223,9 +1223,9 @@ int ast_channel_avoxi_purge_all_buffers(struct ast_channel *chan, enum ast_frame
 	}
 	AST_LIST_TRAVERSE_SAFE_END;
 
-	/* Purge jitter buffer if it exists */
+	/* Purge jitter buffer if it exists and is active */
 	jb = ast_channel_jb(chan);
-	if (jb && ast_test_flag(jb, JB_CREATED)) {
+	if (jb && jb->impl && jb->jbobj) {
 		const struct ast_jb_impl *jbimpl = jb->impl;
 		void *jbobj = jb->jbobj;
 		struct ast_frame *f;
