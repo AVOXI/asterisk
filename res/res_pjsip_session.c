@@ -58,6 +58,7 @@
 #define SDP_HANDLER_BUCKETS 11
 
 #define MOD_DATA_ON_RESPONSE "on_response"
+#define MOD_DATA_SUPPRESS_SIDE_EFFECTS "suppress_session_side_effects"
 
 /* Most common case is one audio and one video stream */
 #define DEFAULT_NUM_SESSION_MEDIA 2
@@ -2864,6 +2865,19 @@ void ast_sip_session_send_request(struct ast_sip_session *session, pjsip_tx_data
 	ast_sip_session_send_request_with_cb(session, tdata, NULL);
 }
 
+int ast_sip_session_suppress_response_side_effects(pjsip_tx_data *tdata)
+{
+	static const char marker[] = "suppress";
+
+	if (!tdata || session_module.id < 0) {
+		return -1;
+	}
+
+	ast_sip_mod_data_set(tdata->pool, tdata->mod_data, session_module.id,
+		MOD_DATA_SUPPRESS_SIDE_EFFECTS, (void *) marker);
+	return 0;
+}
+
 int ast_sip_session_create_invite(struct ast_sip_session *session, pjsip_tx_data **tdata)
 {
 	pjmedia_sdp_session *offer;
@@ -4772,6 +4786,15 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 		tsx->mod_data[id] = e->body.tsx_state.src.tdata->mod_data[id];
 		break;
 	case PJSIP_EVENT_RX_MSG:
+		/*
+		 * Recording-fork MESSAGE stays on this dialog so it keeps the Call-ID
+		 * and CSeq, but it is not call signaling. Do not let supplements apply
+		 * a Reason header to the channel, and do not resend on 401/407/494.
+		 */
+		if (tsx->last_tx && ast_sip_mod_data_get(tsx->last_tx->mod_data, id,
+				MOD_DATA_SUPPRESS_SIDE_EFFECTS)) {
+			SCOPE_EXIT_RTN("Suppressed in-dialog request side effects\n");
+		}
 		cb = ast_sip_mod_data_get(tsx->mod_data, id, MOD_DATA_ON_RESPONSE);
 		/* As the PJSIP invite session implementation responds with a 200 OK before we have a
 		 * chance to be invoked session supplements for BYE requests actually end up executing

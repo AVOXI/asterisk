@@ -839,6 +839,21 @@ void ast_sip_session_send_request_with_cb(struct ast_sip_session *session, pjsip
 		ast_sip_session_response_cb on_response);
 
 /*!
+ * \brief Keep an in-dialog request from changing call state
+ *
+ * The INVITE session authenticates 401/407/494 by resending the request, and
+ * session supplements may apply a response Reason header to the channel.
+ * Call this on the session serializer after the request is built and before
+ * it is sent. Responses to that request then leave the dialog's challenge
+ * budget, hangup cause, and media state alone.
+ *
+ * \param tdata Request about to be sent on the session dialog
+ * \retval 0 Success
+ * \retval -1 Failure. The caller must not send tdata.
+ */
+int ast_sip_session_suppress_response_side_effects(pjsip_tx_data *tdata);
+
+/*!
  * \brief Retrieves a session from a dialog
  *
  * \param dlg The dialog to retrieve the session from

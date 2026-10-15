@@ -3387,6 +3387,124 @@ static void ast_ari_channels_transfer_progress_cb(
 fin: __attribute__((unused))
 	return;
 }
+int ast_ari_channels_recording_fork_parse_body(
+	struct ast_json *body,
+	struct ast_ari_channels_recording_fork_args *args)
+{
+	struct ast_json *field;
+	/* Parse query parameters out of it */
+	field = ast_json_object_get(body, "action");
+	if (field) {
+		args->action = ast_json_string_get(field);
+	}
+	field = ast_json_object_get(body, "orgId");
+	if (field) {
+		args->org_id = ast_json_string_get(field);
+	}
+	field = ast_json_object_get(body, "callId");
+	if (field) {
+		args->call_id = ast_json_string_get(field);
+	}
+	field = ast_json_object_get(body, "sentHost");
+	if (field) {
+		args->sent_host = ast_json_string_get(field);
+	}
+	field = ast_json_object_get(body, "heardHost");
+	if (field) {
+		args->heard_host = ast_json_string_get(field);
+	}
+	field = ast_json_object_get(body, "codec");
+	if (field) {
+		args->codec = ast_json_string_get(field);
+	}
+	return 0;
+}
+
+/*!
+ * \brief Parameter parsing callback for /channels/{channelId}/recordingFork.
+ * \param ser TCP/TLS session object
+ * \param get_params GET parameters in the HTTP request.
+ * \param path_vars Path variables extracted from the request.
+ * \param headers HTTP headers.
+ * \param body
+ * \param[out] response Response to the HTTP request.
+ */
+static void ast_ari_channels_recording_fork_cb(
+	struct ast_tcptls_session_instance *ser,
+	struct ast_variable *get_params, struct ast_variable *path_vars,
+	struct ast_variable *headers, struct ast_json *body, struct ast_ari_response *response)
+{
+	struct ast_ari_channels_recording_fork_args args = {};
+	struct ast_variable *i;
+#if defined(AST_DEVMODE)
+	int is_valid;
+	int code;
+#endif /* AST_DEVMODE */
+
+	for (i = get_params; i; i = i->next) {
+		if (strcmp(i->name, "action") == 0) {
+			args.action = (i->value);
+		} else
+		if (strcmp(i->name, "orgId") == 0) {
+			args.org_id = (i->value);
+		} else
+		if (strcmp(i->name, "callId") == 0) {
+			args.call_id = (i->value);
+		} else
+		if (strcmp(i->name, "sentHost") == 0) {
+			args.sent_host = (i->value);
+		} else
+		if (strcmp(i->name, "heardHost") == 0) {
+			args.heard_host = (i->value);
+		} else
+		if (strcmp(i->name, "codec") == 0) {
+			args.codec = (i->value);
+		} else
+		{}
+	}
+	for (i = path_vars; i; i = i->next) {
+		if (strcmp(i->name, "channelId") == 0) {
+			args.channel_id = (i->value);
+		} else
+		{}
+	}
+	args.request = body;
+	ast_ari_channels_recording_fork(headers, &args, response);
+#if defined(AST_DEVMODE)
+	code = response->response_code;
+
+	switch (code) {
+	case 0: /* Implementation is still a stub, or the code wasn't set */
+		is_valid = response->message == NULL;
+		break;
+	case 500: /* Internal Server Error */
+	case 501: /* Not Implemented */
+	case 400: /* Missing or invalid fields for the action */
+	case 404: /* Channel not found */
+	case 409: /* Channel not in a Stasis application; channel is not a live PJSIP session */
+	case 504: /* No final SIP response within timeoutMs */
+		is_valid = 1;
+		break;
+	default:
+		if (200 <= code && code <= 299) {
+			is_valid = ast_ari_validate_object(
+				response->message);
+		} else {
+			ast_log(LOG_ERROR, "Invalid error response %d for /channels/{channelId}/recordingFork\n", code);
+			is_valid = 0;
+		}
+	}
+
+	if (!is_valid) {
+		ast_log(LOG_ERROR, "Response validation failed for /channels/{channelId}/recordingFork\n");
+		ast_ari_response_error(response, 500,
+			"Internal Server Error", "Response validation failed");
+	}
+#endif /* AST_DEVMODE */
+
+fin: __attribute__((unused))
+	return;
+}
 
 /*! \brief REST handler for /api-docs/channels.json */
 static struct stasis_rest_handlers channels_create = {
@@ -3596,6 +3714,15 @@ static struct stasis_rest_handlers channels_channelId_transfer_progress = {
 	.children = {  }
 };
 /*! \brief REST handler for /api-docs/channels.json */
+static struct stasis_rest_handlers channels_channelId_recordingFork = {
+	.path_segment = "recordingFork",
+	.callbacks = {
+		[AST_HTTP_POST] = ast_ari_channels_recording_fork_cb,
+	},
+	.num_children = 0,
+	.children = {  }
+};
+/*! \brief REST handler for /api-docs/channels.json */
 static struct stasis_rest_handlers channels_channelId = {
 	.path_segment = "channelId",
 	.is_wildcard = 1,
@@ -3604,8 +3731,8 @@ static struct stasis_rest_handlers channels_channelId = {
 		[AST_HTTP_POST] = ast_ari_channels_originate_with_id_cb,
 		[AST_HTTP_DELETE] = ast_ari_channels_hangup_cb,
 	},
-	.num_children = 19,
-	.children = { &channels_channelId_continue,&channels_channelId_move,&channels_channelId_redirect,&channels_channelId_answer,&channels_channelId_ring,&channels_channelId_progress,&channels_channelId_dtmf,&channels_channelId_mute,&channels_channelId_hold,&channels_channelId_moh,&channels_channelId_silence,&channels_channelId_play,&channels_channelId_record,&channels_channelId_variable,&channels_channelId_variables,&channels_channelId_snoop,&channels_channelId_dial,&channels_channelId_rtp_statistics,&channels_channelId_transfer_progress, }
+	.num_children = 20,
+	.children = { &channels_channelId_continue,&channels_channelId_move,&channels_channelId_redirect,&channels_channelId_answer,&channels_channelId_ring,&channels_channelId_progress,&channels_channelId_dtmf,&channels_channelId_mute,&channels_channelId_hold,&channels_channelId_moh,&channels_channelId_silence,&channels_channelId_play,&channels_channelId_record,&channels_channelId_variable,&channels_channelId_variables,&channels_channelId_snoop,&channels_channelId_dial,&channels_channelId_rtp_statistics,&channels_channelId_transfer_progress,&channels_channelId_recordingFork, }
 };
 /*! \brief REST handler for /api-docs/channels.json */
 static struct stasis_rest_handlers channels_externalMedia = {
