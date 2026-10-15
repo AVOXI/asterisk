@@ -53,6 +53,9 @@
 
 /*** DOCUMENTATION
 	<function name="CURL" language="en_US">
+		<since>
+			<version>10.0.0</version>
+		</since>
 		<synopsis>
 			Retrieve content from a remote web or ftp server
 		</synopsis>
@@ -95,6 +98,9 @@
 		</see-also>
 	</function>
 	<function name="CURLOPT" language="en_US">
+		<since>
+			<version>10.0.0</version>
+		</since>
 		<synopsis>
 			Sets various options for future invocations of CURL.
 		</synopsis>
@@ -124,6 +130,15 @@
 					<enum name="header">
 						<para>Include header information in the result
 						(boolean)</para>
+					</enum>
+					<enum name="httpauth">
+						<para>Type of authentication method to use. The default is Basic Authentication.</para>
+						<para>Multiple values can be specified to enable multiple authentication methods.
+						To do so, invoke CURLOPT once using comma-separated values.</para>
+						<enumlist>
+							<enum name="basic" />
+							<enum name="digest" />
+						</enumlist>
 					</enum>
 					<enum name="httpheader">
 						<para>Add HTTP header. Multiple calls add multiple headers.
@@ -172,6 +187,46 @@
 					<enum name="ssl_verifypeer">
 						<para>Whether to verify the server certificate against
 						a list of known root certificate authorities (boolean).</para>
+					</enum>
+					<enum name="ssl_verifyhost">
+						<para>Whether to verify the host in the server's TLS certificate.
+						Set to 2 to verify the host, 0 to ignore the host.</para>
+					</enum>
+					<enum name="ssl_cainfo">
+						<para>Path to a file holding one or more certificates to verify
+						the peer's certificate with. Only used when <literal>ssl_verifypeer</literal>
+						is enabled.</para>
+					</enum>
+					<enum name="ssl_capath">
+						<para>Path to a directory holding multiple CA certificates to
+						verify the peer's certificate with. Only used when <literal>ssl_verifypeer</literal>
+						is enabled.</para>
+					</enum>
+					<enum name="ssl_cert">
+						<para>Path to a file containing a client certificate. Default format
+						is PEM, and can be changed with <literal>ssl_certtype</literal>.</para>
+					</enum>
+					<enum name="ssl_certtype">
+						<para>The format of the <literal>ssl_cert</literal> file.</para>
+						<enumlist>
+							<enum name="PEM" />
+							<enum name="DER" />
+						</enumlist>
+					</enum>
+					<enum name="ssl_key">
+						<para>Path to a file containing a client private key. Default format
+						is PEM, and can be changed with <literal>ssl_keytype</literal></para>
+					</enum>
+					<enum name="ssl_keytype">
+						<para>The format of the <literal>ssl_key</literal> file.</para>
+						<enumlist>
+							<enum name="PEM" />
+							<enum name="DER" />
+							<enum name="ENG" />
+						</enumlist>
+					</enum>
+					<enum name="ssl_keypasswd">
+						<para>The passphrase to use the <literal>ssl_key</literal> file.</para>
 					</enum>
 					<enum name="hashcompat">
 						<para>Assuming the responses will be in <literal>key1=value1&amp;key2=value2</literal>
@@ -262,6 +317,9 @@ static int parse_curlopt_key(const char *name, CURLoption *key, enum optiontype 
 	} else if (!strcasecmp(name, "httpheader")) {
 		*key = CURLOPT_HTTPHEADER;
 		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "httpauth")) {
+		*key = CURLOPT_HTTPAUTH;
+		*ot = OT_ENUM;
 	} else if (!strcasecmp(name, "proxy")) {
 		*key = CURLOPT_PROXY;
 		*ot = OT_STRING;
@@ -320,6 +378,30 @@ static int parse_curlopt_key(const char *name, CURLoption *key, enum optiontype 
 	} else if (!strcasecmp(name, "ssl_verifypeer")) {
 		*key = CURLOPT_SSL_VERIFYPEER;
 		*ot = OT_BOOLEAN;
+	} else if (!strcasecmp(name, "ssl_verifyhost")) {
+		*key = CURLOPT_SSL_VERIFYHOST;
+		*ot = OT_INTEGER;
+	} else if (!strcasecmp(name, "ssl_cainfo")) {
+		*key = CURLOPT_CAINFO;
+		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "ssl_capath")) {
+		*key = CURLOPT_CAPATH;
+		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "ssl_cert")) {
+		*key = CURLOPT_SSLCERT;
+		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "ssl_certtype")) {
+		*key = CURLOPT_SSLCERTTYPE;
+		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "ssl_key")) {
+		*key = CURLOPT_SSLKEY;
+		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "ssl_keytype")) {
+		*key = CURLOPT_SSLKEYTYPE;
+		*ot = OT_STRING;
+	} else if (!strcasecmp(name, "ssl_keypasswd")) {
+		*key = CURLOPT_KEYPASSWD;
+		*ot = OT_STRING;
 	} else if (!strcasecmp(name, "hashcompat")) {
 		*key = CURLOPT_SPECIAL_HASHCOMPAT;
 		*ot = OT_ENUM;
@@ -418,6 +500,25 @@ static int acf_curlopt_write(struct ast_channel *chan, const char *cmd, char *na
 
 				if ((new = ast_calloc(1, sizeof(*new)))) {
 					new->value = (void *)ptype;
+				}
+			} else if (key == CURLOPT_HTTPAUTH) {
+				long authtype = 0;
+				char *authmethod, *authstr = ast_strdupa(value);
+				while ((authmethod = strsep(&authstr, ","))) {
+					if (!strcasecmp(authmethod, "basic")) {
+						authtype |= CURLAUTH_BASIC;
+					} else if (!strcasecmp(authmethod, "digest")) {
+						authtype |= CURLAUTH_DIGEST;
+					} else {
+						ast_log(LOG_WARNING, "Auth method '%s' invalid or not supported\n", authmethod);
+						return -1;
+					}
+				}
+				if (!authmethod) {
+					ast_log(LOG_WARNING, "Auth method '%s' invalid or not supported\n", value);
+				}
+				if ((new = ast_calloc(1, sizeof(*new)))) {
+					new->value = (void *)authtype;
 				}
 			} else if (key == CURLOPT_SPECIAL_HASHCOMPAT) {
 				if ((new = ast_calloc(1, sizeof(*new)))) {
@@ -619,8 +720,8 @@ static int curl_instance_init(void *data)
 	if (!(*curl = curl_easy_init()))
 		return -1;
 
-	curl_easy_setopt(*curl, CURLOPT_NOSIGNAL, 1);
-	curl_easy_setopt(*curl, CURLOPT_TIMEOUT, 180);
+	curl_easy_setopt(*curl, CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(*curl, CURLOPT_TIMEOUT, 180L);
 	curl_easy_setopt(*curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 	curl_easy_setopt(*curl, CURLOPT_USERAGENT, AST_CURL_USER_AGENT);
 

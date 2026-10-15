@@ -50,43 +50,6 @@ struct ast_ari_events_event_websocket_args {
 	/*! Subscribe to all Asterisk events. If provided, the applications listed will be subscribed to all events, effectively disabling the application specific subscriptions. Default is 'false'. */
 	int subscribe_all;
 };
-
-/*!
- * \brief WebSocket connection for events.
- *
- * \retval  0 success
- * \retval -1 error
- */
-int ast_ari_websocket_events_event_websocket_init(void);
-
-/*!
- * \brief WebSocket connection for events.
- */
-void ast_ari_websocket_events_event_websocket_dtor(void);
-
-/*!
- * \brief WebSocket connection for events.
- *
- * \param ser HTTP TCP/TLS Server Session
- * \param headers HTTP headers
- * \param args Swagger parameters
- * \param session_id The id of the current session.
- *
- * \retval 0 success
- * \retval non-zero error
- */
-int ast_ari_websocket_events_event_websocket_attempted(struct ast_tcptls_session_instance *ser,
-	struct ast_variable *headers, struct ast_ari_events_event_websocket_args *args, const char *session_id);
-
-/*!
- * \brief WebSocket connection for events.
- *
- * \param session ARI WebSocket.
- * \param headers HTTP headers.
- * \param args Swagger parameters.
- */
-void ast_ari_websocket_events_event_websocket_established(struct ast_ari_websocket_session *session,
-	struct ast_variable *headers, struct ast_ari_events_event_websocket_args *args);
 /*! Argument struct for ast_ari_events_user_event() */
 struct ast_ari_events_user_event_args {
 	/*! Event name */
@@ -121,5 +84,33 @@ int ast_ari_events_user_event_parse_body(
  * \param[out] response HTTP response
  */
 void ast_ari_events_user_event(struct ast_variable *headers, struct ast_ari_events_user_event_args *args, struct ast_ari_response *response);
+/*! Argument struct for ast_ari_events_claim_channel() */
+struct ast_ari_events_claim_channel_args {
+	/*! The ID of the channel to claim */
+	const char *channel_id;
+	/*! The name of the application claiming the channel */
+	const char *application;
+};
+/*!
+ * \brief Body parsing function for /events/claim.
+ * \param body The JSON body from which to parse parameters.
+ * \param[out] args The args structure to parse into.
+ * \retval zero on success
+ * \retval non-zero on failure
+ */
+int ast_ari_events_claim_channel_parse_body(
+	struct ast_json *body,
+	struct ast_ari_events_claim_channel_args *args);
+
+/*!
+ * \brief Claim a broadcast channel for this application.
+ *
+ * Atomically claims a channel that is in broadcast state. Only the first claim succeeds.
+ *
+ * \param headers HTTP headers
+ * \param args Swagger parameters
+ * \param[out] response HTTP response
+ */
+void ast_ari_events_claim_channel(struct ast_variable *headers, struct ast_ari_events_claim_channel_args *args, struct ast_ari_response *response);
 
 #endif /* _ASTERISK_RESOURCE_EVENTS_H */

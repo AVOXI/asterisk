@@ -201,8 +201,8 @@ extern "C" {
  */
 #define AST_ALERT_FD	(AST_MAX_FDS-1)		/*!< used for alertpipe */
 #define AST_TIMING_FD	(AST_MAX_FDS-2)		/*!< used for timingfd */
-#define AST_AGENT_FD	(AST_MAX_FDS-3)		/*!< used by agents for pass through */
-#define AST_GENERATOR_FD	(AST_MAX_FDS-4)	/*!< used by generator */
+#define AST_AGENT_FD	(AST_MAX_FDS-3)		/*!< unused - formerly used by agents for pass through */
+#define AST_GENERATOR_FD	(AST_MAX_FDS-4)	/*!< unused - formerly used by generator */
 #define AST_JITTERBUFFER_FD	(AST_MAX_FDS-5)	/*!< used by generator */
 
 enum ast_bridge_result {
@@ -1455,15 +1455,17 @@ int ast_queue_answer(struct ast_channel *chan, const struct ast_stream_topology 
 /*!
  * \brief Change channel name
  *
- * \pre Absolutely all channels _MUST_ be unlocked before calling this function.
+ * \pre Absolutely all channels and the channel storage backend _MUST_ be
+ * unlocked before calling this function.
  *
  * \param chan the channel to change the name of
  * \param newname the name to change to
  *
- * \note this function must _NEVER_ be used when any channels are locked
- * regardless if it is the channel who's name is being changed or not because
- * it invalidates our channel container locking order... lock container first,
- * then the individual channels, never the other way around.
+ * \note this function must _NEVER_ be used when any channels or the channel
+ * storage backend are locked regardless if it is the channel who's name is
+ * being changed or not because it invalidates our channel container locking
+ * order... lock container first, then the individual channels, never the
+ * other way around.
  */
 void ast_change_name(struct ast_channel *chan, const char *newname);
 
@@ -2035,10 +2037,12 @@ int ast_safe_sleep_conditional(struct ast_channel *chan, int ms, int (*cond)(voi
  * \param nfds the number of fds to wait upon
  * \param exception exception flag
  * \param outfd fd that had activity on it
- * \param ms how long the wait was
+ * \param ms On invocation, max wait time. Upon returning, how long the wait
+ * actually was (in/out parameter).
  * \details
  * Big momma function here.  Wait for activity on any of the n channels, or any of the nfds
- * file descriptors.
+ * file descriptors. -1 can be passed as the ms timeout to wait forever, 0 to
+ * return instantly if theres no activity immediantely available.
  * \return Returns the channel with activity, or NULL on error or if an FD
  * came first.  If the FD came first, it will be returned in outfd, otherwise, outfd
  * will be -1
@@ -2745,7 +2749,8 @@ void ast_channel_inherit_variables(const struct ast_channel *parent, struct ast_
  * \param chan the channel
  * \param vars a linked list of variables
  *
- * \pre chan is locked
+ * \warning The channel must not be locked if there's a possibility that
+ * a dialplan function would be invoked.
  *
  * \details
  * Variable names can be for a regular channel variable or a dialplan function
@@ -2842,6 +2847,16 @@ void ast_channel_internal_swap_endpoint_forward(struct ast_channel *a, struct as
  * This is used in masquerade to exchange snapshots
  */
 void ast_channel_internal_swap_snapshots(struct ast_channel *a, struct ast_channel *b);
+
+/*!
+ * \brief Swap endpoints between two channels
+ * \param a First channel
+ * \param b Second channel
+ *
+ * \note
+ * This is used in masquerade to exchange endpoints
+ */
+void ast_channel_internal_swap_endpoints(struct ast_channel *a, struct ast_channel *b);
 
 /*!
  * \brief Set uniqueid and linkedid string value only (not time)
@@ -3117,6 +3132,13 @@ struct ast_channel *ast_channel_iterator_next(struct ast_channel_iterator *i);
 
 /*! @} End channel iterator definitions. */
 
+/*! @{ Channel search functions */
+
+/*!
+* \warning Absolutely _NO_ channel locks should be held while calling any of
+* these functions.
+*/
+
 /*!
  * \brief Call a function with every active channel
  *
@@ -3124,40 +3146,49 @@ struct ast_channel *ast_channel_iterator_next(struct ast_channel_iterator *i);
  * This function executes a callback one time for each active channel on the
  * system.  The channel is provided as an argument to the function.
  *
- * \note Absolutely _NO_ channel locks should be held before calling this function.
  * \since 1.8
  */
 struct ast_channel *ast_channel_callback(ao2_callback_data_fn *cb_fn, void *arg,
 		void *data, int ao2_flags);
 
-/*! @{ Channel search functions */
-
 /*!
- * \brief Find a channel by name
+ * \brief Find a channel by name or uniqueid
  *
- * \param name the name or uniqueid of the channel to search for
+ * \param search the name or uniqueid of the channel to search for
  *
  * \details
- * Find a channel that has the same name as the provided argument.
+ * First searches for a channel with a matching name.  If not found
+ * a search for a channel with a matching uniqueid is done.
  *
- * \retval a channel with the name specified by the argument
+ * \retval a channel with a matching name or uniqueid
  * \retval NULL if no channel was found
+ *
+ *\note The fallback search by uniqueid is a historical thing.  If you
+ * know the search term is a uniqueid, use \ref ast_channel_get_by_uniqueid
+ * instead.
  *
  * \since 1.8
  */
-struct ast_channel *ast_channel_get_by_name(const char *name);
+struct ast_channel *ast_channel_get_by_name(const char *search);
 
 /*!
  * \brief Find a channel by a name prefix
  *
- * \param name The channel name or uniqueid prefix to search for
- * \param name_len Only search for up to this many characters from the name
+ * \param search The channel name or uniqueid prefix to search for
+ * \param len Only search for up to this many characters from the search term
  *
  * \details
- * Find a channel that has the same name prefix as specified by the arguments.
+ * Search for a channel that has the same name prefix as specified by the
+ * search term.  If not found, search for an exact match on the uniqueid.
+ * Searching by partial uniqueid doesn't make any sense as it's usually
+ * a system-name plus a timestamp and is not supported.
  *
- * \retval a channel with the name prefix specified by the arguments
+ * \retval a channel with a matching name or uniqueid
  * \retval NULL if no channel was found
+ *
+ *\note The fallback search by uniqueid is a historical thing.  If you
+ * know the search term is a uniqueid, use \ref ast_channel_get_by_uniqueid
+ * instead.
  *
  * \since 1.8
  */
@@ -3178,6 +3209,16 @@ struct ast_channel *ast_channel_get_by_name_prefix(const char *name, size_t name
  * \since 1.8
  */
 struct ast_channel *ast_channel_get_by_exten(const char *exten, const char *context);
+
+/*!
+ * \brief Find a channel by a uniqueid
+ *
+ * \param uniqueid The uniqueid to search for
+ *
+ * \retval a channel with the uniqueid specified by the arguments
+ * \retval NULL if no channel was found
+ */
+struct ast_channel *ast_channel_get_by_uniqueid(const char *uniqueid);
 
 /*! @} End channel search functions. */
 
@@ -3956,10 +3997,13 @@ int ast_channel_redirecting_sub(struct ast_channel *autoservice_chan, struct ast
  * This function makes use of datastore operations on the channel, so
  * it is important to lock the channel before calling this function.
  *
+ * \warning You should call this function only if \ref ast_cc_is_enabled()
+ * returns true.
+ *
  * \param chan The channel to create the datastore on
  * \param base_params CCSS parameters we wish to copy into the channel
  * \retval 0 Success
- * \retval -1 Failure
+ * \retval -1 Failure or CCSS is globally disabled.
  */
 int ast_channel_cc_params_init(struct ast_channel *chan,
 		const struct ast_cc_config_params *base_params);
@@ -3972,8 +4016,11 @@ int ast_channel_cc_params_init(struct ast_channel *chan,
  * This function makes use of datastore operations on the channel, so
  * it is important to lock the channel before calling this function.
  *
+ * \warning You should call this function only if \ref ast_cc_is_enabled()
+ * returns true.
+ *
  * \param chan Channel to retrieve parameters from
- * \retval NULL Failure
+ * \retval NULL Failure or CCSS is globally disabled.
  * \retval non-NULL The parameters desired
  */
 struct ast_cc_config_params *ast_channel_get_cc_config_params(struct ast_channel *chan);
@@ -4157,6 +4204,8 @@ int ast_channel_fdno(const struct ast_channel *chan);
 void ast_channel_fdno_set(struct ast_channel *chan, int value);
 int ast_channel_hangupcause(const struct ast_channel *chan);
 void ast_channel_hangupcause_set(struct ast_channel *chan, int value);
+int ast_channel_tech_hangupcause(const struct ast_channel *chan);
+void ast_channel_tech_hangupcause_set(struct ast_channel *chan, int value);
 int ast_channel_priority(const struct ast_channel *chan);
 void ast_channel_priority_set(struct ast_channel *chan, int value);
 int ast_channel_rings(const struct ast_channel *chan);
@@ -4232,6 +4281,8 @@ ast_callid ast_channel_callid(const struct ast_channel *chan);
 struct ast_channel_snapshot *ast_channel_snapshot(const struct ast_channel *chan);
 void ast_channel_snapshot_set(struct ast_channel *chan, struct ast_channel_snapshot *snapshot);
 struct ast_flags *ast_channel_snapshot_segment_flags(struct ast_channel *chan);
+struct ast_endpoint *ast_channel_endpoint(const struct ast_channel *chan);
+void ast_channel_endpoint_set(struct ast_channel *chan, struct ast_endpoint *endpoint);
 
 /*!
  * \pre chan is locked
@@ -4363,6 +4414,12 @@ int ast_channel_fd_count(const struct ast_channel *chan);
  */
 int ast_channel_fd_add(struct ast_channel *chan, int value);
 
+/* ARI reportable variables accessors */
+size_t ast_channel_internal_ari_reportable_vars_count(const struct ast_channel *chan);
+char *ast_channel_internal_ari_reportable_vars_get(const struct ast_channel *chan, size_t index);
+int ast_channel_internal_ari_reportable_vars_append(struct ast_channel *chan, char *key);
+char *ast_channel_internal_ari_reportable_vars_remove(struct ast_channel *chan, size_t index);
+
 pthread_t ast_channel_blocker(const struct ast_channel *chan);
 void ast_channel_blocker_set(struct ast_channel *chan, pthread_t value);
 
@@ -4397,6 +4454,26 @@ void ast_channel_internal_bridged_channel_set(struct ast_channel *chan, struct a
  * \retval Pointer to an ast_str object containing the desired information which must be freed
  */
 struct ast_str *ast_channel_dialed_causes_channels(const struct ast_channel *chan);
+
+/*!
+ * \since 20.19.0
+ * \since 22.9.0
+ * \since 23.3.0
+ * \brief Retrieve an iterator for dialed cause information
+ *
+ * \details
+ * Each call to ao2_iterator_next() will return a pointer to an ast_control_pvt_cause_code
+ * structure containing the dialed cause information for one channel.  One of the entries
+ * may be for the channel itself if the channel was hung up because of a non-2XX SIP
+ * response code. The rest of the entries will be for channels bridged to the channel for
+ * which dialed cause information is being retrieved.  The caller is responsible for
+ * cleaning up the reference count of each entry returned and destroying the returned
+ * iterator with ao2_iterator_destroy() when it is finished with it.
+ *
+ * \param chan The channel from which to retrieve cause information
+ * \retval ao2_iterator
+ */
+struct ao2_iterator ast_channel_dialed_causes_iterator(const struct ast_channel *chan);
 
 /*!
  * \since 11
@@ -4531,6 +4608,20 @@ void ast_channel_set_ari_vars(size_t varc, char **vars);
  * \retval NULL on error
  */
 struct varshead *ast_channel_get_ari_vars(struct ast_channel *chan);
+
+/*!
+ * \since 20.20.0
+ * \since 22.10.0
+ * \since 23.4.0
+ * \brief Set whether a channel variable should be included in REST events on the channel.
+ *
+ * \param chan Channel to update.
+ * \param variable Variable name or dialplan function expression.
+ * \param report_events Non-zero to include in REST events, zero to omit.
+ * \retval 0 on success
+ * \retval -1 on failure
+ */
+int ast_channel_set_ari_var_reportable(struct ast_channel *chan, const char *variable, int report_events);
 
 /*!
  * \since 12
@@ -4996,5 +5087,27 @@ void *ast_channel_get_stream_topology_change_source(struct ast_channel *chan);
 #define ast_channel_has_tech_function(chan, function) \
 	(ast_channel_tech(chan) ? ast_channel_tech(chan)->function != NULL : 0)
 
+/*!
+ * \brief Get the name of the current channel storage driver
+ *
+ * \return The name of the current channel storage driver
+ */
+const char *ast_channel_get_current_storage_driver_name(void);
+
+/*!
+ * \internal
+ * \brief Set the current channel storage driver
+ *
+ * \param driver_name The name of the driver to set as the current driver
+ *
+ * \return 0 on success, -1 on failure
+ *
+ * \warning Changing the channel storage driver while Asterisk is running is
+ *          not supported.  This function will return an error if called while
+ *          the ast_fully_booted flag is set.  The function is exposed only
+ *          because options.c needs it to set the driver when reading
+ *          asterisk.conf.
+ */
+int internal_channel_set_current_storage_driver(const char *driver_name);
 
 #endif /* _ASTERISK_CHANNEL_H */

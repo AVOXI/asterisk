@@ -87,6 +87,9 @@
 
 /*** DOCUMENTATION
 	<function name="PP_EACH_EXTENSION" language="en_US">
+		<since>
+			<version>1.6.1.0</version>
+		</since>
 		<synopsis>
 			Execute specified template for each extension.
 		</synopsis>
@@ -99,6 +102,9 @@
 		</description>
 	</function>
 	<function name="PP_EACH_USER" language="en_US">
+		<since>
+			<version>1.6.0</version>
+		</since>
 		<synopsis>
 			Generate a string for each phoneprov user.
 		</synopsis>
@@ -630,7 +636,7 @@ static void build_profile(const char *name, struct ast_variable *v)
 			ast_string_field_set(profile, staticdir, v->value);
 		} else {
 			struct phoneprov_file *pp_file;
-			char *file_extension;
+			const char *file_extension;
 			char value_copy[strlen(v->value) + 1];
 
 			AST_DECLARE_APP_ARGS(args,

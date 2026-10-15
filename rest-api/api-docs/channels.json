@@ -6,6 +6,9 @@
 	"swaggerVersion": "1.1",
 	"basePath": "http://localhost:8088/ari",
 	"resourcePath": "/api-docs/channels.{format}",
+	"since": [
+		"12.0.0"
+	],
 	"requiresModules": [
 		"res_stasis_answer",
 		"res_stasis_playback",
@@ -19,12 +22,18 @@
 			"operations": [
 				{
 					"httpMethod": "GET",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "List all active channels in Asterisk.",
 					"nickname": "list",
 					"responseClass": "List[Channel]"
 				},
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Create a new channel (originate).",
 					"notes": "The new channel is created immediately and a snapshot of it returned. If a Stasis application is provided it will be automatically subscribed to the originated channel for further events and updates.",
 					"nickname": "originate",
@@ -105,7 +114,7 @@
 						},
 						{
 							"name": "variables",
-							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\" } }",
+							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing \"value\" (string) and optional \"report_events\" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\", \"Call_State\": { \"value\": \"WaitingForAgent\", \"report_events\": true } } }",
 							"paramType": "body",
 							"required": false,
 							"dataType": "containers",
@@ -163,6 +172,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"14.0.0"
+					],
 					"summary": "Create channel.",
 					"nickname": "create",
 					"responseClass": "Channel",
@@ -225,7 +237,7 @@
 						},
 						{
 							"name": "variables",
-							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\" } }",
+							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing \"value\" (string) and optional \"report_events\" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\", \"Call_State\": { \"value\": \"WaitingForAgent\", \"report_events\": true } } }",
 							"paramType": "body",
 							"required": false,
 							"dataType": "containers",
@@ -247,6 +259,9 @@
 			"operations": [
 				{
 					"httpMethod": "GET",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Channel details.",
 					"nickname": "get",
 					"responseClass": "Channel",
@@ -269,6 +284,9 @@
 				},
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.2.0"
+					],
 					"summary": "Create a new channel (originate with id).",
 					"notes": "The new channel is created immediately and a snapshot of it returned. If a Stasis application is provided it will be automatically subscribed to the originated channel for further events and updates.",
 					"nickname": "originateWithId",
@@ -357,7 +375,7 @@
 						},
 						{
 							"name": "variables",
-							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\" } }",
+							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing \"value\" (string) and optional \"report_events\" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\", \"Call_State\": { \"value\": \"WaitingForAgent\", \"report_events\": true } } }",
 							"paramType": "body",
 							"required": false,
 							"dataType": "containers",
@@ -402,6 +420,9 @@
 				},
 				{
 					"httpMethod": "DELETE",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Delete (i.e. hangup) a channel.",
 					"nickname": "hangup",
 					"responseClass": "void",
@@ -468,6 +489,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Exit application; continue execution in the dialplan.",
 					"nickname": "continueInDialplan",
 					"responseClass": "void",
@@ -536,6 +560,10 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"13.26.0",
+						"16.3.0"
+					],
 					"summary": "Move the channel from one Stasis application to another.",
 					"nickname": "move",
 					"responseClass": "void",
@@ -584,6 +612,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"13.3.0"
+					],
 					"summary": "Redirect the channel to a different location.",
 					"nickname": "redirect",
 					"responseClass": "void",
@@ -636,6 +667,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Answer a channel.",
 					"nickname": "answer",
 					"responseClass": "void",
@@ -672,6 +706,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Indicate ringing to a channel.",
 					"nickname": "ring",
 					"responseClass": "void",
@@ -702,8 +739,52 @@
 				},
 				{
 					"httpMethod": "DELETE",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Stop ringing indication on a channel if locally generated.",
 					"nickname": "ringStop",
+					"responseClass": "void",
+					"parameters": [
+						{
+							"name": "channelId",
+							"description": "Channel's id",
+							"paramType": "path",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						}
+					],
+					"errorResponses": [
+						{
+							"code": 404,
+							"reason": "Channel not found"
+						},
+						{
+							"code": 409,
+							"reason": "Channel not in a Stasis application"
+						},
+						{
+							"code": 412,
+							"reason": "Channel in invalid state"
+						}
+					]
+				}
+			]
+		},
+		{
+			"path": "/channels/{channelId}/progress",
+			"description": "Indicate progress on a channel",
+			"operations": [
+				{
+					"httpMethod": "POST",
+					"since": [
+						"22.6.0",
+						"21.11.0",
+						"20.16.0"
+					],
+					"summary": "Indicate progress on a channel.",
+					"nickname": "progress",
 					"responseClass": "void",
 					"parameters": [
 						{
@@ -738,6 +819,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Send provided DTMF to a given channel.",
 					"nickname": "sendDTMF",
 					"responseClass": "void",
@@ -822,6 +906,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Mute a channel.",
 					"nickname": "mute",
 					"responseClass": "void",
@@ -869,6 +956,9 @@
 				},
 				{
 					"httpMethod": "DELETE",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Unmute a channel.",
 					"nickname": "unmute",
 					"responseClass": "void",
@@ -922,6 +1012,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Hold a channel.",
 					"nickname": "hold",
 					"responseClass": "void",
@@ -952,6 +1045,9 @@
 				},
 				{
 					"httpMethod": "DELETE",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Remove a channel from hold.",
 					"nickname": "unhold",
 					"responseClass": "void",
@@ -988,6 +1084,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Play music on hold to a channel.",
 					"notes": "Using media operations such as /play on a channel playing MOH in this manner will suspend MOH without resuming automatically. If continuing music on hold is desired, the stasis application must reinitiate music on hold.",
 					"nickname": "startMoh",
@@ -1027,6 +1126,9 @@
 				},
 				{
 					"httpMethod": "DELETE",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Stop playing music on hold to a channel.",
 					"nickname": "stopMoh",
 					"responseClass": "void",
@@ -1063,6 +1165,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Play silence to a channel.",
 					"notes": "Using media operations such as /play on a channel playing silence in this manner will suspend silence without resuming automatically.",
 					"nickname": "startSilence",
@@ -1094,6 +1199,9 @@
 				},
 				{
 					"httpMethod": "DELETE",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Stop playing silence to a channel.",
 					"nickname": "stopSilence",
 					"responseClass": "void",
@@ -1130,6 +1238,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Start playback of media.",
 					"notes": "The media URI may be any of a number of URI's. Currently sound:, recording:, number:, digits:, characters:, and tone: URI's are supported. This operation creates a playback resource that can be used to control the playback of media (pause, rewind, fast forward, etc.)",
 					"nickname": "play",
@@ -1208,6 +1319,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.2.0"
+					],
 					"summary": "Start playback of media and specify the playbackId.",
 					"notes": "The media URI may be any of a number of URI's. Currently sound:, recording:, number:, digits:, characters:, and tone: URI's are supported. This operation creates a playback resource that can be used to control the playback of media (pause, rewind, fast forward, etc.)",
 					"nickname": "playWithId",
@@ -1286,6 +1400,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Start a recording.",
 					"notes": "Record audio from a channel. Note that this will not capture audio sent to the channel. The bridge itself has a record feature if that's what you want.",
 					"nickname": "record",
@@ -1397,7 +1514,7 @@
 						},
 						{
 							"code": 409,
-							"reason": "Channel is not in a Stasis application; the channel is currently bridged with other hcannels; A recording with the same name already exists on the system and can not be overwritten because it is in progress or ifExists=fail"
+							"reason": "Channel is not in a Stasis application; the channel is currently bridged with other channels; A recording with the same name already exists on the system and can not be overwritten because it is in progress or ifExists=fail"
 						},
 						{
 							"code": 422,
@@ -1413,6 +1530,9 @@
 			"operations": [
 				{
 					"httpMethod": "GET",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Get the value of a channel variable or function.",
 					"nickname": "getChannelVar",
 					"responseClass": "Variable",
@@ -1451,6 +1571,9 @@
 				},
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Set the value of a channel variable or function.",
 					"nickname": "setChannelVar",
 					"responseClass": "void",
@@ -1478,6 +1601,15 @@
 							"required": false,
 							"allowMultiple": false,
 							"dataType": "string"
+						},
+						{
+							"name": "report_events",
+							"description": "Whether this variable should be included in channel events. Defaults to false.",
+							"paramType": "query",
+							"required": false,
+							"allowMultiple": false,
+							"dataType": "boolean",
+							"defaultValue": false
 						}
 					],
 					"errorResponses": [
@@ -1498,11 +1630,107 @@
 			]
 		},
 		{
+			"path": "/channels/{channelId}/variables",
+			"description": "Multiple variables on a channel",
+			"operations": [
+				{
+					"httpMethod": "GET",
+					"since": [
+						"20.20.0",
+						"22.10.0",
+						"23.4.0"
+					],
+					"summary": "Get the value of multiple channel variables or functions.",
+					"nickname": "getChannelVars",
+					"responseClass": "Variables",
+					"parameters": [
+						{
+							"name": "channelId",
+							"description": "Channel's id",
+							"paramType": "path",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "variables",
+							"description": "The channel variables or functions to get",
+							"paramType": "query",
+							"required": true,
+							"allowMultiple": true,
+							"dataType": "string"
+						}
+					],
+					"errorResponses": [
+						{
+							"code": 400,
+							"reason": "Missing variables parameter."
+						},
+						{
+							"code": 404,
+							"reason": "Channel or variable not found"
+						},
+						{
+							"code": 409,
+							"reason": "Channel not in a Stasis application"
+						}
+					]
+				},
+				{
+					"httpMethod": "POST",
+					"since": [
+						"20.20.0",
+						"22.10.0",
+						"23.4.0"
+					],
+					"summary": "Set the values of multiple channel variables or functions.",
+					"nickname": "setChannelVars",
+					"responseClass": "void",
+					"parameters": [
+						{
+							"name": "channelId",
+							"description": "Channel's id",
+							"paramType": "path",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "variables",
+							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel. Each variable value may be either a string or an object containing \"value\" (string) and optional \"report_events\" (boolean) to include updates for that variable in channel events (defaults to false). Ex. { \"variables\": { \"CALLERID(name)\": \"Alice\", \"Call_State\": { \"value\": \"WaitingForAgent\", \"report_events\": true } } }",
+							"paramType": "body",
+							"required": true,
+							"dataType": "containers",
+							"allowMultiple": false
+						}
+					],
+					"errorResponses": [
+						{
+							"code": 400,
+							"reason": "Missing variables parameter."
+						},
+						{
+							"code": 404,
+							"reason": "Channel not found"
+						},
+						{
+							"code": 409,
+							"reason": "Channel not in a Stasis application"
+						}
+					]
+
+				}
+			]
+		},
+		{
 			"path": "/channels/{channelId}/snoop",
 			"description": "Snoop (spy/whisper) on a channel",
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.0.0"
+					],
 					"summary": "Start snooping.",
 					"notes": "Snoop (spy/whisper) on a specific channel.",
 					"nickname": "snoopChannel",
@@ -1596,6 +1824,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"12.2.0"
+					],
 					"summary": "Start snooping.",
 					"notes": "Snoop (spy/whisper) on a specific channel.",
 					"nickname": "snoopChannelWithId",
@@ -1689,6 +1920,9 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"14.0.0"
+					],
 					"summary": "Dial a created channel.",
 					"nickname": "dial",
 					"responseClass": "void",
@@ -1742,6 +1976,10 @@
 			"operations": [
 				{
 					"httpMethod": "GET",
+					"since": [
+						"13.27.0",
+						"16.4.0"
+					],
 					"summary": "RTP stats on a channel.",
 					"nickname": "rtpstatistics",
 					"responseClass": "RTPstat",
@@ -1770,8 +2008,12 @@
 			"operations": [
 				{
 					"httpMethod": "POST",
+					"since": [
+						"16.6.0",
+						"17.1.0"
+					],
 					"summary": "Start an External Media session.",
-					"notes": "Create a channel to an External Media source/sink.",
+					"notes": "Create a channel to an External Media source/sink.  The combination of transport and encapsulation will select one of chan_rtp(udp/rtp), chan_audiosocket(tcp/audiosocket) or chan_websocket(websocket/none) channel drivers.",
 					"nickname": "externalMedia",
 					"responseClass": "Channel",
 					"parameters": [
@@ -1793,7 +2035,7 @@
 						},
 						{
 							"name": "variables",
-							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\" } }",
+							"description": "The \"variables\" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing \"value\" (string) and optional \"report_events\" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { \"endpoint\": \"SIP/Alice\", \"variables\": { \"CALLERID(name)\": \"Alice\", \"Call_State\": { \"value\": \"WaitingForAgent\", \"report_events\": true } } }",
 							"paramType": "body",
 							"required": false,
 							"dataType": "containers",
@@ -1801,15 +2043,15 @@
 						},
 						{
 							"name": "external_host",
-							"description": "Hostname/ip:port of external host",
+							"description": "Hostname/ip:port or websocket_client connection ID of external host.  May be empty for a websocket server connection.",
 							"paramType": "query",
-							"required": true,
+							"required": false,
 							"allowMultiple": false,
 							"dataType": "string"
 						},
 						{
 							"name": "encapsulation",
-							"description": "Payload encapsulation protocol",
+							"description": "Payload encapsulation protocol.  Must be 'none' for the websocket transport.",
 							"paramType": "query",
 							"required": false,
 							"allowMultiple": false,
@@ -1819,7 +2061,8 @@
 								"valueType": "LIST",
 								"values": [
 									"rtp",
-									"audiosocket"
+									"audiosocket",
+									"none"
 								]
 							}
 						},
@@ -1835,13 +2078,14 @@
 								"valueType": "LIST",
 								"values": [
 									"udp",
-									"tcp"
+									"tcp",
+									"websocket"
 								]
 							}
 						},
 						{
 							"name": "connection_type",
-							"description": "Connection type (client/server)",
+							"description": "Connection type (client/server). 'server' is only valid for the websocket transport.",
 							"paramType": "query",
 							"required": false,
 							"allowMultiple": false,
@@ -1850,7 +2094,8 @@
 							"allowableValues": {
 								"valueType": "LIST",
 								"values": [
-									"client"
+									"client",
+									"server"
 								]
 							}
 						},
@@ -1884,6 +2129,14 @@
 							"required": false,
 							"allowMultiple": false,
 							"dataType": "string"
+						},
+						{
+							"name": "transport_data",
+							"description": "Transport-specific data. For websocket this is appended to the dialstring.",
+							"paramType": "query",
+							"required": false,
+							"allowMultiple": false,
+							"dataType": "string"
 						}
 					],
 					"errorResponses": [
@@ -1894,6 +2147,159 @@
 						{
 							"code": 409,
 							"reason": "Channel is not in a Stasis application; Channel is already bridged"
+						}
+					]
+				}
+			]
+		},
+		{
+			"path": "/channels/{channelId}/transfer_progress",
+			"description": "Inform the channel that the transfer is in progress.",
+			"operations": [
+				{
+					"httpMethod": "POST",
+					"since": [
+						"22.3.0",
+						"21.8.0",
+						"20.13.0"
+					],
+					"summary": "Inform the channel about the progress of the attended/blind transfer.",
+					"nickname": "transfer_progress",
+					"responseClass": "void",
+					"parameters": [
+						{
+							"name": "channelId",
+							"description": "Channel's id",
+							"paramType": "path",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "states",
+							"description": "The state of the progress",
+							"paramType": "query",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						}
+					],
+					"errorResponses": [
+						{
+							"code": 400,
+							"reason": "Endpoint parameter not provided"
+						},
+						{
+							"code": 404,
+							"reason": "Channel or endpoint not found"
+						},
+						{
+							"code": 409,
+							"reason": "Channel not in a Stasis application"
+						},
+						{
+							"code": 412,
+							"reason": "Channel in invalid state"
+						}
+					]
+				}
+			]
+		},
+		{
+			"path": "/channels/{channelId}/recordingFork",
+			"description": "Send an in-dialog recording-fork SIP MESSAGE on a PJSIP channel.",
+			"operations": [
+				{
+					"httpMethod": "POST",
+					"since": [
+						"22.10.1"
+					],
+					"summary": "Start or stop an in-dialog recording fork.",
+					"notes": "Sends FORK_START or FORK_STOP as a text/plain MESSAGE on the channel's existing PJSIP dialog. The request does not create a channel, send SDP, or re-INVITE. sentHost and heardHost are an IPv4 address or hostname; the body field is host:port. A 200 body is {\"sipStatus\": n} when the final SIP response is 2xx. A final SIP response of 300 or higher is HTTP 500 with the same body.",
+					"nickname": "recordingFork",
+					"responseClass": "object",
+					"parameters": [
+						{
+							"name": "channelId",
+							"description": "Channel's id. The initiating PJSIP channel, not a new recording channel.",
+							"paramType": "path",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "request",
+							"description": "JSON body. Fields are action, orgId, callId, and for start also sentHost, sentPort, heardHost, heardPort, and codec. timeoutMs is optional.",
+							"paramType": "body",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "object"
+						},
+						{
+							"name": "action",
+							"description": "start or stop",
+							"paramType": "query",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "orgId",
+							"description": "Organization id placed in the FORK_START / FORK_STOP body",
+							"paramType": "query",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "callId",
+							"description": "Call id placed in the FORK_START / FORK_STOP body",
+							"paramType": "query",
+							"required": true,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "sentHost",
+							"description": "Start only. IPv4 address or hostname that receives initiator-sent audio",
+							"paramType": "query",
+							"required": false,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "heardHost",
+							"description": "Start only. IPv4 address or hostname that receives initiator-heard audio",
+							"paramType": "query",
+							"required": false,
+							"allowMultiple": false,
+							"dataType": "string"
+						},
+						{
+							"name": "codec",
+							"description": "Start only. Codec name placed in the FORK_START body",
+							"paramType": "query",
+							"required": false,
+							"allowMultiple": false,
+							"dataType": "string"
+						}
+					],
+					"errorResponses": [
+						{
+							"code": 400,
+							"reason": "Missing or invalid fields for the action"
+						},
+						{
+							"code": 404,
+							"reason": "Channel not found"
+						},
+						{
+							"code": 409,
+							"reason": "Channel not in a Stasis application; channel is not a live PJSIP session"
+						},
+						{
+							"code": 504,
+							"reason": "No final SIP response within timeoutMs"
 						}
 					]
 				}

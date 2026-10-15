@@ -24,7 +24,7 @@
 #include "asterisk/acl.h"
 #include "include/res_pjsip_private.h"
 #include "asterisk/taskprocessor.h"
-#include "asterisk/threadpool.h"
+#include "asterisk/taskpool.h"
 #include "asterisk/res_pjsip_cli.h"
 
 static int distribute(void *data);
@@ -75,7 +75,7 @@ static pj_status_t record_serializer(pjsip_tx_data *tdata)
 {
 	struct ast_taskprocessor *serializer;
 
-	serializer = ast_threadpool_serializer_get_current();
+	serializer = ast_taskpool_serializer_get_current();
 	if (serializer) {
 		const char *name;
 
@@ -486,7 +486,7 @@ static pj_bool_t distributor(pjsip_rx_data *rdata)
 	struct ast_taskprocessor *serializer = NULL;
 	pjsip_rx_data *clone;
 
-	if (!ast_test_flag(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)) {
+	if (!ast_fully_booted) {
 		/*
 		 * Ignore everything until we are fully booted.  Let the
 		 * peer retransmit messages until we are ready.
@@ -588,7 +588,8 @@ static pj_bool_t distributor(pjsip_rx_data *rdata)
 	return PJ_TRUE;
 }
 
-static struct ast_sip_auth *alloc_artificial_auth(char *default_realm)
+static struct ast_sip_auth *alloc_artificial_auth(char *default_realm,
+	char *default_algos_uac, char *default_algos_uas)
 {
 	struct ast_sip_auth *fake_auth;
 
@@ -601,6 +602,13 @@ static struct ast_sip_auth *alloc_artificial_auth(char *default_realm)
 	ast_string_field_set(fake_auth, realm, default_realm);
 	ast_string_field_set(fake_auth, auth_user, "");
 	ast_string_field_set(fake_auth, auth_pass, "");
+
+	ast_sip_auth_digest_algorithms_vector_init("artificial",
+		&fake_auth->supported_algorithms_uac, "UAC", default_algos_uac);
+
+	ast_sip_auth_digest_algorithms_vector_init("artificial",
+		&fake_auth->supported_algorithms_uas, "UAS", default_algos_uas);
+
 	fake_auth->type = AST_SIP_AUTH_TYPE_ARTIFICIAL;
 
 	return fake_auth;
@@ -612,16 +620,23 @@ static int create_artificial_auth(void)
 {
 	char default_realm[AST_SIP_AUTH_MAX_REALM_LENGTH + 1];
 	struct ast_sip_auth *fake_auth;
+	char default_algos_uac[AST_SIP_AUTH_MAX_SUPPORTED_ALGORITHMS_LENGTH + 1];
+	char default_algos_uas[AST_SIP_AUTH_MAX_SUPPORTED_ALGORITHMS_LENGTH + 1];
 
 	ast_sip_get_default_realm(default_realm, sizeof(default_realm));
-	fake_auth = alloc_artificial_auth(default_realm);
+	ast_sip_get_default_auth_algorithms_uac(default_algos_uac,
+		sizeof(default_algos_uac));
+	ast_sip_get_default_auth_algorithms_uas(default_algos_uas,
+		sizeof(default_algos_uas));
+
+	fake_auth = alloc_artificial_auth(default_realm, default_algos_uac,
+			default_algos_uas);
 	if (!fake_auth) {
 		ast_log(LOG_ERROR, "Unable to create artificial auth\n");
 		return -1;
 	}
-
 	ao2_global_obj_replace_unref(artificial_auth, fake_auth);
-	ao2_ref(fake_auth, -1);
+	ao2_cleanup(fake_auth);
 	return 0;
 }
 
@@ -1161,8 +1176,6 @@ static int clean_task(const void *data)
 
 static void global_loaded(const char *object_type)
 {
-	char default_realm[AST_SIP_AUTH_MAX_REALM_LENGTH + 1];
-	struct ast_sip_auth *fake_auth;
 	char *identifier_order;
 
 	/* Update using_auth_username */
@@ -1182,18 +1195,7 @@ static void global_loaded(const char *object_type)
 		using_auth_username = new_using;
 	}
 
-	/* Update default_realm of artificial_auth */
-	ast_sip_get_default_realm(default_realm, sizeof(default_realm));
-	fake_auth = ast_sip_get_artificial_auth();
-	if (!fake_auth || strcmp(fake_auth->realm, default_realm)) {
-		ao2_cleanup(fake_auth);
-
-		fake_auth = alloc_artificial_auth(default_realm);
-		if (fake_auth) {
-			ao2_global_obj_replace_unref(artificial_auth, fake_auth);
-		}
-	}
-	ao2_cleanup(fake_auth);
+	create_artificial_auth();
 
 	ast_sip_get_unidentified_request_thresholds(&unidentified_count, &unidentified_period, &unidentified_prune_interval);
 

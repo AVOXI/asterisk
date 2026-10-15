@@ -298,14 +298,12 @@ int ast_base64decode(unsigned char *dst, const char *src, int max)
 	int cnt = 0;
 	unsigned int byte = 0;
 	unsigned int bits = 0;
-	int incnt = 0;
 	while(*src && *src != '=' && (cnt < max)) {
 		/* Shift in 6 bits of input */
 		byte <<= 6;
 		byte |= (b2a[(int)(*src)]) & 0x3f;
 		bits += 6;
 		src++;
-		incnt++;
 		/* If we have at least 8 bits left over, take that character
 		   off the top */
 		if (bits >= 8)  {
@@ -776,6 +774,42 @@ void ast_uri_decode(char *s, struct ast_flags spec)
 			*o = *s;
 	}
 	*o = '\0';
+}
+
+int ast_uri_verify_encoded(const char *string)
+{
+	const char *ptr = string;
+	size_t length;
+	char *endl;
+
+	if (!string) {
+		return 0;
+	}
+
+	length = strlen(string);
+	endl = (char *)string + length;
+
+	while (*ptr) {
+		if (*ptr == '%') {
+			unsigned int tmp;
+			/* Make sure there are at least 2 characters left to decode */
+			if (ptr + 2 >= endl) {
+				return 0;
+			}
+			/* Try to parse the next two characters as hex */
+			if (sscanf(ptr + 1, "%2x", &tmp) != 1) {
+				return 0;
+			}
+			/* All good, move past the '%' and the two hex digits */
+			ptr += 3;
+		} else if (!isalnum((unsigned char ) *ptr) && !strchr("-_.+", *ptr)) {
+			return 0;
+		} else {
+			ptr++;
+		}
+	}
+
+	return 1; /* all characters are valid */
 }
 
 char *ast_escape_quoted(const char *string, char *outbuf, int buflen)
@@ -1818,7 +1852,7 @@ int ast_carefulwrite(int fd, char *s, int len, int timeoutms)
 char *ast_strip_quoted(char *s, const char *beg_quotes, const char *end_quotes)
 {
 	char *e;
-	char *q;
+	const char *q;
 
 	s = ast_strip(s);
 	if ((q = strchr(beg_quotes, *s)) && *q != '\0') {
@@ -2631,7 +2665,7 @@ int ast_utils_init(void)
 /*!
  *\brief Parse digest authorization header.
  *\return Returns -1 if we have no auth or something wrong with digest.
- *\note	This function may be used for Digest request and responce header.
+ *\note	This function may be used for Digest request and response header.
  * request arg is set to nonzero, if we parse Digest Request.
  * pedantic arg can be set to nonzero if we need to do addition Digest check.
  */

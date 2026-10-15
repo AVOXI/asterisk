@@ -28,6 +28,7 @@
 #include <time.h>	/* we want to override localtime_r */
 #include <unistd.h>
 #include <string.h>
+#include "asterisk/endian.h"
 
 #include "asterisk/lock.h"
 #include "asterisk/time.h"
@@ -110,10 +111,29 @@ extern unsigned int __unsigned_int_flags_dummy;
 					} while (0)
 
 
-/* The following 64-bit flag code can most likely be erased after app_dial
-   is reorganized to either reduce the large number of options, or handle
-   them in some other way. At the time of this writing, app_dial would be
-   the only user of 64-bit option flags */
+/*!
+ * \brief Swap the upper and lower 32 bits of a big-endian 64-bit integer
+ *
+ * This macro is needed to preserve ABI compatability on big-endian systems
+ * after changing from a 32 bit flags to a 64 bit flags.  It ensures that a
+ * new 64-bit flag field will still work with a function that expects a
+ * 32-bit flag field.  On a little-endian system, nothing is needed, since
+ * the 64-bit flags are already in the correct order.
+ *
+ * \note This macro is different than a standard byte swap, as it
+ * doesn't reverse the byte order, it just swaps the upper 4 bytes with
+ * the lower 4 bytes.
+ *
+ * \param flags The 64-bit flags to swap
+ * \retval The flags with the upper and lower 32 bits swapped if the system is big-endian,
+ */
+#if defined(BYTE_ORDER) && (BYTE_ORDER == BIG_ENDIAN)
+#define SWAP64_32(flags) (((uint64_t)flags << 32) | ((uint64_t)flags >> 32))
+#elif defined(BYTE_ORDER) && (BYTE_ORDER == LITTLE_ENDIAN)
+#define SWAP64_32(flags) (flags)
+#else
+#error "Endianness not known - endian.h broken?"
+#endif
 
 extern uint64_t __unsigned_int_flags_dummy64;
 
@@ -121,21 +141,21 @@ extern uint64_t __unsigned_int_flags_dummy64;
 					typeof ((p)->flags) __p = (p)->flags; \
 					typeof (__unsigned_int_flags_dummy64) __x = 0; \
 					(void) (&__p == &__x); \
-					((p)->flags & (flag)); \
+					((p)->flags & SWAP64_32(flag)); \
 					})
 
 #define ast_set_flag64(p,flag) 		do { \
 					typeof ((p)->flags) __p = (p)->flags; \
 					typeof (__unsigned_int_flags_dummy64) __x = 0; \
 					(void) (&__p == &__x); \
-					((p)->flags |= (flag)); \
+					((p)->flags |= SWAP64_32(flag)); \
 					} while(0)
 
 #define ast_clear_flag64(p,flag) 		do { \
 					typeof ((p)->flags) __p = (p)->flags; \
 					typeof (__unsigned_int_flags_dummy64) __x = 0; \
 					(void) (&__p == &__x); \
-					((p)->flags &= ~(flag)); \
+					((p)->flags &= ~SWAP64_32(flag)); \
 					} while(0)
 
 #define ast_copy_flags64(dest,src,flagz)	do { \
@@ -144,8 +164,8 @@ extern uint64_t __unsigned_int_flags_dummy64;
 					typeof (__unsigned_int_flags_dummy64) __x = 0; \
 					(void) (&__d == &__x); \
 					(void) (&__s == &__x); \
-					(dest)->flags &= ~(flagz); \
-					(dest)->flags |= ((src)->flags & (flagz)); \
+					(dest)->flags &= ~SWAP64_32(flagz); \
+					(dest)->flags |= ((src)->flags & SWAP64_32(flagz)); \
 					} while (0)
 
 #define ast_set2_flag64(p,value,flag)	do { \
@@ -153,19 +173,20 @@ extern uint64_t __unsigned_int_flags_dummy64;
 					typeof (__unsigned_int_flags_dummy64) __x = 0; \
 					(void) (&__p == &__x); \
 					if (value) \
-						(p)->flags |= (flag); \
+						(p)->flags |= SWAP64_32(flag); \
 					else \
-						(p)->flags &= ~(flag); \
+						(p)->flags &= ~SWAP64_32(flag); \
 					} while (0)
 
 #define ast_set_flags_to64(p,flag,value)	do { \
 					typeof ((p)->flags) __p = (p)->flags; \
 					typeof (__unsigned_int_flags_dummy64) __x = 0; \
 					(void) (&__p == &__x); \
-					(p)->flags &= ~(flag); \
-					(p)->flags |= (value); \
+					(p)->flags &= ~SWAP64_32(flag); \
+					(p)->flags |= SWAP64_32(value); \
 					} while (0)
 
+#define AST_FLAGS64_ALL ULONG_MAX
 
 /* Non-type checking variations for non-unsigned int flags.  You
    should only use non-unsigned int flags where required by
@@ -401,6 +422,19 @@ char *ast_uri_encode(const char *string, char *outbuf, int buflen, struct ast_fl
  */
 void ast_uri_decode(char *s, struct ast_flags spec);
 
+/*!
+ * \brief Verify if a string is valid as a URI component
+ *
+ * This function checks if the string either doesn't need encoding
+ * or is already properly URI encoded.
+ * Valid characters are 'a-zA-Z0-9.+_-' and '%xx' escape sequences.
+ *
+ * \param string String to be checked
+ * \retval 1 if the string is valid
+ * \retval 0 if the string is not valid
+ */
+int ast_uri_verify_encoded(const char *string);
+
 /*! ast_xml_escape
 	\brief Escape reserved characters for use in XML.
 
@@ -495,8 +529,11 @@ static force_inline void ast_slinear_saturated_multiply_float(short *input, floa
 		*input = 32767;
 	else if (res < -32768)
 		*input = -32768;
+	else if (res > 0)
+		*input = (short) (res + 0.5);
 	else
-		*input = (short) res;
+		*input = (short) (res - 0.5);
+
 }
 
 static force_inline void ast_slinear_saturated_divide(short *input, short *value)
@@ -511,8 +548,11 @@ static force_inline void ast_slinear_saturated_divide_float(short *input, float 
 		*input = 32767;
 	else if (res < -32768)
 		*input = -32768;
+	else if (res > 0)
+		*input = (short) (res + 0.5);
 	else
-		*input = (short) res;
+		*input = (short) (res - 0.5);
+
 }
 
 #ifdef localtime_r
@@ -729,7 +769,7 @@ void DO_CRASH_NORETURN __ast_assert_failed(int condition, const char *condition_
 		return __VA_ARGS__; \
 	}\
 })
-static void force_inline _ast_assert(int condition, const char *condition_str, const char *file, int line, const char *function)
+static force_inline void _ast_assert(int condition, const char *condition_str, const char *file, int line, const char *function)
 {
 	if (__builtin_expect(!condition, 1)) {
 		__ast_assert_failed(condition, condition_str, file, line, function);

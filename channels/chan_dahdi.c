@@ -131,6 +131,9 @@
 
 /*** DOCUMENTATION
 	<application name="DAHDISendKeypadFacility" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Send digits out of band over a PRI.
 		</synopsis>
@@ -143,6 +146,9 @@
 		</description>
 	</application>
 	<application name="DAHDISendCallreroutingFacility" language="en_US">
+		<since>
+			<version>1.6.2.0</version>
+		</since>
 		<synopsis>
 			Send an ISDN call rerouting/deflection facility message.
 		</synopsis>
@@ -164,6 +170,9 @@
 		</description>
 	</application>
 	<application name="DAHDIAcceptR2Call" language="en_US">
+		<since>
+			<version>1.6.1.0</version>
+		</since>
 		<synopsis>
 			Accept an R2 call if its not already accepted (you still need to answer it)
 		</synopsis>
@@ -178,6 +187,11 @@
 		</description>
 	</application>
 	<function name="POLARITY" language="en_US">
+		<since>
+			<version>16.28.0</version>
+			<version>18.14.0</version>
+			<version>19.6.0</version>
+		</since>
 		<synopsis>
 			Set or get the polarity of a DAHDI channel.
 		</synopsis>
@@ -203,6 +217,61 @@
 			</example>
 			<example title="Reverse the polarity from whatever it is currently">
 			same => n,Set(POLARITY()=${IF($[ "${POLARITY()}" = "1" ]?0:1)})
+			</example>
+		</description>
+	</function>
+	<function name="DAHDI_CHANNEL" language="en_US">
+		<synopsis>
+			Set or get a property of a DAHDI channel.
+		</synopsis>
+		<syntax>
+			<parameter name="property" required="true">
+				<para>The property to set or get.</para>
+				<enumlist>
+					<enum name="owner">
+						<para>R/O The name of the active channel on this DAHDI device.</para>
+					</enum>
+					<enum name="callwait">
+						<para>R/O The name of the call waiting channel on this DAHDI device.</para>
+					</enum>
+					<enum name="threeway">
+						<para>R/O The name of the three-way channel on this DAHDI device.</para>
+					</enum>
+					<enum name="polarity">
+						<para>R/W The polarity of the channel (0 or 1, idle or reverse can also be used for setting).</para>
+						<para>Only valid on FXO-signalled channels.</para>
+					</enum>
+					<enum name="dnd">
+						<para>R/W Whether Do Not Disturb is active.</para>
+						<para>Only valid on FXO-signalled channels.</para>
+					</enum>
+					<enum name="callforward">
+						<para>R/W The call forwarding target number.</para>
+						<para>Only valid on FXO-signalled channels.</para>
+					</enum>
+					<enum name="lastexten">
+						<para>R/W The last number dialed.</para>
+						<para>Only valid on FXO-signalled channels.</para>
+					</enum>
+				</enumlist>
+			</parameter>
+			<parameter name="channel" required="false">
+				<para>The DAHDI channel number.</para>
+				<para>If not specified, the DAHDI channel number of the current channel
+				will be used (in which case it must be a DAHDI channel).</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>The DAHDI_CHANNEL function can be used to set or get properties of DAHDI channels
+			that are not specific to Asterisk channels.</para>
+			<para>This function may also be called from non-DAHDI channels.</para>
+			<example title="Set reverse polarity on current DAHDI channel">
+			same => n,Set(DAHDI_CHANNEL(polarity)=1)
+			same => n,NoOp(${DAHDI_CHANNEL(polarity)})
+			</example>
+			<example title="Set call forwarding target for channel 1">
+			same => n,Set(DAHDI_CHANNEL(callforwardnumber,1)=5552368)
+			same => n,NoOp(Calls now forwarding to ${DAHDI_CHANNEL(callforwardnumber,1)})
 			</example>
 		</description>
 	</function>
@@ -263,11 +332,16 @@
 			</enum>
 			<enum name="dialmode">
 				<para>R/W Pulse and tone dialing mode of the channel.</para>
-				<para>Disabling tone dialing using this option will not disable the DSP used for DTMF detection.
+				<para>Disabling tone dialing using this option will not automatically disable the DSP used for DTMF detection.
 				To do that, also set the <literal>digitdetect</literal> option. If digit detection is disabled,
 				DTMF will not be detected, regardless of the <literal>dialmode</literal> setting.
 				The <literal>digitdetect</literal> setting has no impact on pulse dialing detection.</para>
 				<para>If set, overrides the setting in <literal>chan_dahdi.conf</literal> for that channel.</para>
+				<para>The <literal>dialmode</literal> setting applies to the DAHDI channel as a whole, but is reset for each call,
+				so modifications made using the <literal>CHANNEL</literal> function apply temporarily per-call.
+				The <literal>digitdetect</literal> setting applies to the entire DAHDI channel,
+				so any changes made to this setting will affect all calls concurrently on the same DAHDI channel.
+				<literal>digitdetect</literal> is reset once all calls on the line have cleared.</para>
 				<enumlist>
 					<enum name="both" />
 					<enum name="pulse" />
@@ -347,6 +421,9 @@
 		</example>
 	</info>
 	<manager name="DAHDITransfer" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Transfer DAHDI Channel.
 		</synopsis>
@@ -362,6 +439,9 @@
 		</description>
 	</manager>
 	<manager name="DAHDIHangup" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Hangup DAHDI Channel.
 		</synopsis>
@@ -377,6 +457,9 @@
 		</description>
 	</manager>
 	<manager name="DAHDIDialOffhook" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Dial over DAHDI channel while offhook.
 		</synopsis>
@@ -394,6 +477,9 @@
 		</description>
 	</manager>
 	<manager name="DAHDIDNDon" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Toggle DAHDI channel Do Not Disturb status ON.
 		</synopsis>
@@ -409,6 +495,9 @@
 		</description>
 	</manager>
 	<manager name="DAHDIDNDoff" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Toggle DAHDI channel Do Not Disturb status OFF.
 		</synopsis>
@@ -424,6 +513,9 @@
 		</description>
 	</manager>
 	<manager name="DAHDIShowChannels" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Show status of DAHDI channels.
 		</synopsis>
@@ -438,6 +530,11 @@
 		</description>
 	</manager>
 	<manager name="DAHDIShowStatus" language="en_US">
+		<since>
+			<version>21.3.0</version>
+			<version>20.8.0</version>
+			<version>18.23.0</version>
+		</since>
 		<synopsis>
 			Show status of DAHDI spans.
 		</synopsis>
@@ -447,6 +544,9 @@
 		</description>
 	</manager>
 	<manager name="DAHDIRestart" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Fully Restart DAHDI channels (terminates calls).
 		</synopsis>
@@ -458,6 +558,9 @@
 		</description>
 	</manager>
 	<manager name="PRIShowSpans" language="en_US">
+		<since>
+			<version>10.0.0</version>
+		</since>
 		<synopsis>
 			Show status of PRI spans.
 		</synopsis>
@@ -472,6 +575,9 @@
 		</description>
 	</manager>
 	<manager name="PRIDebugSet" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			Set PRI debug levels for a span
 		</synopsis>
@@ -495,6 +601,9 @@
 		</description>
 	</manager>
 	<manager name="PRIDebugFileSet" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			Set the file used for PRI debug message output
 		</synopsis>
@@ -509,6 +618,9 @@
 		</description>
 	</manager>
 	<manager name="PRIDebugFileUnset" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			Disables file output for PRI debug messages
 		</synopsis>
@@ -518,6 +630,9 @@
 	</manager>
 	<managerEvent language="en_US" name="AlarmClear">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when an alarm is cleared on a DAHDI channel.</synopsis>
 			<syntax>
 				<parameter name="DAHDIChannel">
@@ -529,6 +644,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="SpanAlarmClear">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when an alarm is cleared on a DAHDI span.</synopsis>
 			<syntax>
 				<parameter name="Span">
@@ -539,6 +657,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="DNDState">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when the Do Not Disturb state is changed on a DAHDI channel.</synopsis>
 			<syntax>
 				<parameter name="DAHDIChannel">
@@ -556,6 +677,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="Alarm">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when an alarm is set on a DAHDI channel.</synopsis>
 			<syntax>
 				<parameter name="DAHDIChannel">
@@ -570,6 +694,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="SpanAlarm">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when an alarm is set on a DAHDI span.</synopsis>
 			<syntax>
 				<parameter name="Span">
@@ -583,6 +710,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="DAHDIChannel">
 		<managerEventInstance class="EVENT_FLAG_CALL">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when a DAHDI channel is created or an underlying technology is associated with a DAHDI channel.</synopsis>
 			<syntax>
 				<channel_snapshot/>
@@ -1074,7 +1204,7 @@ static struct dahdi_chan_conf dahdi_chan_conf_default(void)
 			.mohsuggest = "",
 			.parkinglot = "",
 			.transfertobusy = 1,
-			.dialmode = 0,
+			.permdialmode = ANALOG_DIALMODE_BOTH,
 
 			.ani_info_digits = 2,
 			.ani_wink_time = 1000,
@@ -1277,7 +1407,7 @@ static int analogsub_to_dahdisub(enum analog_sub analogsub)
  * \brief release all members on the doomed pris list
  * \since 13.0
  *
- * Called priodically by the monitor threads to release spans marked for
+ * Called periodically by the monitor threads to release spans marked for
  * removal.
  */
 static void release_doomed_pris(void)
@@ -2838,86 +2968,6 @@ static void my_hangup_polarityswitch(void *pvt)
 	}
 }
 
-/*! \brief Return DAHDI pivot if channel is FXO signalled */
-static struct dahdi_pvt *fxo_pvt(struct ast_channel *chan)
-{
-	int res;
-	struct dahdi_params dahdip;
-	struct dahdi_pvt *pvt = NULL;
-
-	if (strcasecmp(ast_channel_tech(chan)->type, "DAHDI")) {
-		ast_log(LOG_WARNING, "%s is not a DAHDI channel\n", ast_channel_name(chan));
-		return NULL;
-	}
-
-	memset(&dahdip, 0, sizeof(dahdip));
-	res = ioctl(ast_channel_fd(chan, 0), DAHDI_GET_PARAMS, &dahdip);
-
-	if (res) {
-		ast_log(LOG_WARNING, "Unable to get parameters of %s: %s\n", ast_channel_name(chan), strerror(errno));
-		return NULL;
-	}
-	if (!(dahdip.sigtype & __DAHDI_SIG_FXO)) {
-		ast_log(LOG_WARNING, "%s is not FXO signalled\n", ast_channel_name(chan));
-		return NULL;
-	}
-
-	pvt = ast_channel_tech_pvt(chan);
-	if (!dahdi_analog_lib_handles(pvt->sig, 0, 0)) {
-		ast_log(LOG_WARNING, "Channel signalling is not analog");
-		return NULL;
-	}
-
-	return pvt;
-}
-
-static int polarity_read(struct ast_channel *chan, const char *cmd, char *data, char *buffer, size_t buflen)
-{
-	struct dahdi_pvt *pvt;
-
-	pvt = fxo_pvt(chan);
-	if (!pvt) {
-		return -1;
-	}
-
-	snprintf(buffer, buflen, "%d", pvt->polarity);
-
-	return 0;
-}
-
-static int polarity_write(struct ast_channel *chan, const char *cmd, char *data, const char *value)
-{
-	struct dahdi_pvt *pvt;
-	int polarity;
-
-	pvt = fxo_pvt(chan);
-	if (!pvt) {
-		return -1;
-	}
-
-	if (!strcasecmp(value, "idle")) {
-		polarity = POLARITY_IDLE;
-	} else if (!strcasecmp(value, "reverse")) {
-		polarity = POLARITY_REV;
-	} else {
-		polarity = atoi(value);
-	}
-
-	if (polarity != POLARITY_IDLE && polarity != POLARITY_REV) {
-		ast_log(LOG_WARNING, "Invalid polarity: '%s'\n", value);
-		return -1;
-	}
-
-	my_set_polarity(pvt, polarity);
-	return 0;
-}
-
-static struct ast_custom_function polarity_function = {
-	.name = "POLARITY",
-	.write = polarity_write,
-	.read = polarity_read,
-};
-
 static int my_start(void *pvt)
 {
 	struct dahdi_pvt *p = pvt;
@@ -3185,7 +3235,7 @@ static void my_pri_make_cc_dialstring(void *priv, char *buf, size_t buf_size)
 		AST_APP_ARG(group);	/* channel/group token */
 		//AST_APP_ARG(ext);	/* extension token */
 		//AST_APP_ARG(opts);	/* options token */
-		//AST_APP_ARG(other);	/* Any remining unused arguments */
+		//AST_APP_ARG(other);	/* Any remaining unused arguments */
 	);
 
 	pvt = priv;
@@ -5399,7 +5449,7 @@ static int dahdi_call(struct ast_channel *ast, const char *rdest, int timeout)
 		AST_APP_ARG(group);	/* channel/group token */
 		AST_APP_ARG(ext);	/* extension token */
 		//AST_APP_ARG(opts);	/* options token */
-		AST_APP_ARG(other);	/* Any remining unused arguments */
+		AST_APP_ARG(other);	/* Any remaining unused arguments */
 	);
 
 	ast_mutex_lock(&p->lock);
@@ -6490,7 +6540,7 @@ static int dahdi_hangup(struct ast_channel *ast)
 				p->subs[SUB_REAL].inthreeway = 0;
 			}
 		} else if (idx == SUB_CALLWAIT) {
-			/* Ditch the holding callwait call, and immediately make it availabe */
+			/* Ditch the holding callwait call, and immediately make it available */
 			if (p->subs[SUB_CALLWAIT].inthreeway) {
 				/* This is actually part of a three way, placed on hold.  Place the third part
 				   on music on hold now */
@@ -6621,6 +6671,16 @@ static int dahdi_hangup(struct ast_channel *ast)
 		p->callwaitcas = 0;
 		p->callwaiting = p->permcallwaiting;
 		p->hidecallerid = p->permhidecallerid;
+		if (dahdi_analog_lib_handles(p->sig, p->radio, 0) && !p->owner) {
+			/* The code in sig_analog handles resetting to permdialmode on originations;
+			 * this addresses the edge case of multiple calls that do not involve
+			 * origination inbetween, i.e. multiple incoming calls. */
+			struct analog_pvt *analog_p = p->sig_pvt;
+			/* If no calls remain, reset dialmode.
+			 * This way, if the next call is an incoming call,
+			 * it's already been reset. */
+			analog_p->dialmode = analog_p->permdialmode;
+		}
 		p->waitingfordt.tv_sec = 0;
 		p->dialing = 0;
 		p->rdnis[0] = '\0';
@@ -6909,7 +6969,7 @@ static int dahdi_setoption(struct ast_channel *chan, int option, void *data, int
 			(*cp == 2) ? "MATE" : "ON", (int) *cp, ast_channel_name(chan));
 		dahdi_ec_disable(p);
 		/* otherwise, turn it on */
-		if (!p->didtdd) { /* if havent done it yet */
+		if (!p->didtdd) { /* if haven't done it yet */
 			unsigned char mybuf[41000];/*! \todo XXX This is an abuse of the stack!! */
 			unsigned char *buf;
 			int size, res, fd, len;
@@ -7307,13 +7367,13 @@ static int dahdi_func_write(struct ast_channel *chan, const char *function, char
 		}
 		/* analog pvt is used for pulse dialing, so update both */
 		if (!strcasecmp(value, "pulse")) {
-			p->dialmode = analog_p->dialmode = ANALOG_DIALMODE_PULSE;
+			analog_p->dialmode = ANALOG_DIALMODE_PULSE;
 		} else if (!strcasecmp(value, "dtmf") || !strcasecmp(value, "tone")) {
-			p->dialmode = analog_p->dialmode = ANALOG_DIALMODE_DTMF;
+			analog_p->dialmode = ANALOG_DIALMODE_DTMF;
 		} else if (!strcasecmp(value, "none")) {
-			p->dialmode = analog_p->dialmode = ANALOG_DIALMODE_NONE;
+			analog_p->dialmode = ANALOG_DIALMODE_NONE;
 		} else if (!strcasecmp(value, "both")) {
-			p->dialmode = analog_p->dialmode = ANALOG_DIALMODE_BOTH;
+			analog_p->dialmode = ANALOG_DIALMODE_BOTH;
 		} else {
 			ast_log(LOG_WARNING, "'%s' is an invalid setting for %s\n", value, data);
 			res = -1;
@@ -8626,7 +8686,7 @@ winkflashdone:
 			(p->polarity == POLARITY_REV) &&
 			((ast_channel_state(ast) == AST_STATE_UP) || (ast_channel_state(ast) == AST_STATE_RING)) ) {
 			/* Added log_debug information below to provide a better indication of what is going on */
-			ast_debug(1, "Polarity Reversal event occured - DEBUG 1: channel %d, state %u, pol= %d, aonp= %d, honp= %d, pdelay= %d, tv= %" PRIi64 "\n", p->channel, ast_channel_state(ast), p->polarity, p->answeronpolarityswitch, p->hanguponpolarityswitch, p->polarityonanswerdelay, ast_tvdiff_ms(ast_tvnow(), p->polaritydelaytv) );
+			ast_debug(1, "Polarity Reversal event occurred - DEBUG 1: channel %d, state %u, pol= %d, aonp= %d, honp= %d, pdelay= %d, tv= %" PRIi64 "\n", p->channel, ast_channel_state(ast), p->polarity, p->answeronpolarityswitch, p->hanguponpolarityswitch, p->polarityonanswerdelay, ast_tvdiff_ms(ast_tvnow(), p->polaritydelaytv) );
 
 			if (ast_tvdiff_ms(ast_tvnow(), p->polaritydelaytv) > p->polarityonanswerdelay) {
 				ast_debug(1, "Polarity Reversal detected and now Hanging up on channel %d\n", p->channel);
@@ -8640,7 +8700,7 @@ winkflashdone:
 			ast_debug(1, "Ignoring Polarity switch to IDLE on channel %d, state %u\n", p->channel, ast_channel_state(ast));
 		}
 		/* Added more log_debug information below to provide a better indication of what is going on */
-		ast_debug(1, "Polarity Reversal event occured - DEBUG 2: channel %d, state %u, pol= %d, aonp= %d, honp= %d, pdelay= %d, tv= %" PRIi64 "\n", p->channel, ast_channel_state(ast), p->polarity, p->answeronpolarityswitch, p->hanguponpolarityswitch, p->polarityonanswerdelay, ast_tvdiff_ms(ast_tvnow(), p->polaritydelaytv) );
+		ast_debug(1, "Polarity Reversal event occurred - DEBUG 2: channel %d, state %u, pol= %d, aonp= %d, honp= %d, pdelay= %d, tv= %" PRIi64 "\n", p->channel, ast_channel_state(ast), p->polarity, p->answeronpolarityswitch, p->hanguponpolarityswitch, p->polarityonanswerdelay, ast_tvdiff_ms(ast_tvnow(), p->polaritydelaytv) );
 		break;
 	default:
 		ast_debug(1, "Dunno what to do with event %d on channel %d\n", res, p->channel);
@@ -8805,7 +8865,7 @@ static struct ast_frame *dahdi_read(struct ast_channel *ast)
 		/*
 		 * Check to see if the channel is still associated with the same
 		 * private structure.  While the Asterisk channel was unlocked
-		 * the following events may have occured:
+		 * the following events may have occurred:
 		 *
 		 * 1) A masquerade may have associated the channel with another
 		 * technology or private structure.
@@ -9209,6 +9269,7 @@ static struct ast_frame *dahdi_read(struct ast_channel *ast)
 		f = &p->subs[idx].f;
 
 	if (f) {
+		struct analog_pvt *analog_p = p->sig_pvt;
 		switch (f->frametype) {
 		case AST_FRAME_DTMF_BEGIN:
 		case AST_FRAME_DTMF_END:
@@ -9217,7 +9278,7 @@ static struct ast_frame *dahdi_read(struct ast_channel *ast)
 			} else {
 				dahdi_handle_dtmf(ast, idx, &f);
 			}
-			if (!(p->dialmode == ANALOG_DIALMODE_BOTH || p->dialmode == ANALOG_DIALMODE_DTMF)) {
+			if (!(analog_p->dialmode == ANALOG_DIALMODE_BOTH || analog_p->dialmode == ANALOG_DIALMODE_DTMF)) {
 				if (f->frametype == AST_FRAME_DTMF_END) { /* only show this message when the key is let go of */
 					ast_debug(1, "Dropping DTMF digit '%c' because tone dialing is disabled\n", f->subclass.integer);
 				}
@@ -9296,6 +9357,26 @@ static int dahdi_write(struct ast_channel *ast, struct ast_frame *frame)
 		ast_mutex_unlock(&p->lock);
 		ast_log(LOG_WARNING, "%s doesn't really exist?\n", ast_channel_name(ast));
 		return -1;
+	}
+
+	if (p->sig == SIG_FXOLS || p->sig == SIG_FXOKS || p->sig == SIG_FXOGS) {
+		struct analog_pvt *analog_p = p->sig_pvt;
+		if (analog_p->callwaitingdeluxepending) {
+			unsigned int mssinceflash = ast_tvdiff_ms(ast_tvnow(), analog_p->flashtime);
+			if (mssinceflash >= 1000) {
+				/* Timer expired: the user hasn't yet selected an option. Take the default action and get on with it. */
+				/* Note: If in the future Advanced Call Waiting Deluxe (*76) is supported, then as part of the
+				 * dialing code, we'll need to automatically invoke the preselected behavior about 2-3 seconds after
+				 * the call waiting begins (this allows for the SAS, CAS, and CWCID spill to be sent first).
+				 */
+				analog_p->callwaitingdeluxepending = 0;
+				analog_callwaiting_deluxe(analog_p, 0);
+			}
+			ast_mutex_unlock(&p->lock);
+			/* The user shouldn't hear anything after hook flashing, until a decision is made, by the user or when the timer expires. */
+			ast_debug(5, "Dropping frame since Call Waiting Deluxe pending on %s\n", ast_channel_name(ast));
+			return 0;
+		}
 	}
 
 	if (p->dialing) {
@@ -9395,8 +9476,11 @@ static int dahdi_indicate(struct ast_channel *chan, int condition, const void *d
 				if ((ast_channel_state(chan) != AST_STATE_RING) ||
 					((p->sig != SIG_FXSKS) &&
 				 (p->sig != SIG_FXSLS) &&
-				 (p->sig != SIG_FXSGS)))
-				ast_setstate(chan, AST_STATE_RINGING);
+				 (p->sig != SIG_FXSGS))) {
+					/* We're playing audible ringback tone on the channel,
+					 * so set state to AST_STATE_RING, not AST_STATE_RINGING. */
+					ast_setstate(chan, AST_STATE_RING);
+				}
 			}
 			break;
 		case AST_CONTROL_INCOMPLETE:
@@ -11983,7 +12067,11 @@ static void *do_monitor(void *data)
 							&& !last->owner
 							&& (!ast_strlen_zero(last->mailbox) || last->mwioverride_active)
 							&& !analog_p->subs[SUB_REAL].owner /* could be a recall ring from a flash hook hold */
-							&& (thispass - analog_p->onhooktime > 3)) {
+							&& (thispass - analog_p->onhooktime > 3)
+							/* In some cases, all of the above checks will pass even if the line is really off-hook.
+							 * This last check will give the right answer 100% of the time, but is relatively
+							 * "expensive" (it requires an ioctl), so it is last to avoid unnecessary system calls. */
+							&& !my_is_off_hook(last)) {
 							res = has_voicemail(last);
 							if (analog_p->msgstate != res) {
 								/* Set driver resources for signalling VMWI */
@@ -11993,6 +12081,7 @@ static void *do_monitor(void *data)
 									ast_debug(3, "Unable to control message waiting led on channel %d: %s\n", last->channel, strerror(errno));
 								}
 								/* If enabled for FSK spill then initiate it */
+								ast_debug(5, "Initiating MWI FSK spill on channel %d\n", last->channel);
 								if (mwi_send_init(last)) {
 									ast_log(LOG_WARNING, "Unable to initiate mwi send sequence on channel %d\n", last->channel);
 								}
@@ -12063,7 +12152,7 @@ static void *do_monitor(void *data)
 							int energy;
 							struct timeval now;
 							/* State machine dtmfcid_holdoff_state allows for the line to settle
-							 * before checking agin for dtmf energy.  Presently waits for 500 mS before checking again
+							 * before checking again for dtmf energy.  Presently waits for 500 mS before checking again
 							*/
 							if (1 == i->dtmfcid_holdoff_state) {
 								gettimeofday(&i->dtmfcid_delay, NULL);
@@ -13029,7 +13118,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 		tmp->immediate = conf->chan.immediate;
 		tmp->immediatering = conf->chan.immediatering;
 		tmp->transfertobusy = conf->chan.transfertobusy;
-		tmp->dialmode = conf->chan.dialmode;
+		tmp->permdialmode = conf->chan.permdialmode;
 		if (chan_sig & __DAHDI_SIG_FXS) {
 			tmp->mwimonitor_fsk = conf->chan.mwimonitor_fsk;
 			tmp->mwimonitor_neon = conf->chan.mwimonitor_neon;
@@ -13055,6 +13144,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 
 		tmp->usedistinctiveringdetection = usedistinctiveringdetection;
 		tmp->callwaitingcallerid = conf->chan.callwaitingcallerid;
+		tmp->callwaitingdeluxe = conf->chan.callwaitingdeluxe; /* Not used in DAHDI pvt, only analog pvt */
 		tmp->threewaycalling = conf->chan.threewaycalling;
 		tmp->threewaysilenthold = conf->chan.threewaysilenthold;
 		tmp->calledsubscriberheld = conf->chan.calledsubscriberheld; /* Not used in chan_dahdi.c, just analog pvt, but must exist on the DAHDI pvt anyways */
@@ -13063,6 +13153,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 		tmp->permhidecallerid = conf->chan.hidecallerid;
 		tmp->hidecalleridname = conf->chan.hidecalleridname;
 		tmp->callreturn = conf->chan.callreturn;
+		tmp->lastnumredial = conf->chan.lastnumredial; /* Not used in DAHDI pvt, only analog pvt */
 		tmp->echocancel = conf->chan.echocancel;
 		tmp->echotraining = conf->chan.echotraining;
 		tmp->pulse = conf->chan.pulse;
@@ -13111,7 +13202,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 		if (tmp->use_smdi) {
 			tmp->smdi_iface = ast_smdi_interface_find(conf->smdi_port);
 			if (!(tmp->smdi_iface)) {
-				ast_log(LOG_ERROR, "Invalid SMDI port specfied, disabling SMDI support\n");
+				ast_log(LOG_ERROR, "Invalid SMDI port specified, disabling SMDI support\n");
 				tmp->use_smdi = 0;
 			}
 		}
@@ -13358,6 +13449,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 				analog_p->permcallwaiting = conf->chan.callwaiting; /* permcallwaiting possibly modified in analog_config_complete */
 				analog_p->calledsubscriberheld = conf->chan.calledsubscriberheld; /* Only actually used in analog pvt, not DAHDI pvt */
 				analog_p->callreturn = conf->chan.callreturn;
+				analog_p->lastnumredial = conf->chan.lastnumredial; /* Only actually used in analog pvt, not DAHDI pvt */
 				analog_p->cancallforward = conf->chan.cancallforward;
 				analog_p->canpark = conf->chan.canpark;
 				analog_p->dahditrcallerid = conf->chan.dahditrcallerid;
@@ -13369,7 +13461,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 				analog_p->threewaycalling = conf->chan.threewaycalling;
 				analog_p->transfer = conf->chan.transfer;
 				analog_p->transfertobusy = conf->chan.transfertobusy;
-				analog_p->dialmode = conf->chan.dialmode;
+				analog_p->permdialmode = conf->chan.permdialmode;
 				analog_p->use_callerid = tmp->use_callerid;
 				analog_p->usedistinctiveringdetection = tmp->usedistinctiveringdetection;
 				analog_p->use_smdi = tmp->use_smdi;
@@ -13393,6 +13485,7 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 					break;
 				}
 				analog_p->callwaitingcallerid = conf->chan.callwaitingcallerid;
+				analog_p->callwaitingdeluxe = conf->chan.callwaitingdeluxe;
 				analog_p->ringt = conf->chan.ringt;
 				analog_p->ringt_base = ringt_base;
 				analog_p->onhooktime = time(NULL);
@@ -13751,7 +13844,7 @@ static struct dahdi_pvt *determine_starting_point(const char *data, struct dahdi
 		AST_APP_ARG(group);	/* channel/group token */
 		//AST_APP_ARG(ext);	/* extension token */
 		//AST_APP_ARG(opts);	/* options token */
-		AST_APP_ARG(other);	/* Any remining unused arguments */
+		AST_APP_ARG(other);	/* Any remaining unused arguments */
 	);
 
 	/*
@@ -15091,7 +15184,7 @@ static char *handle_pri_destroy_span(struct ast_cli_entry *e, int cmd,
 		e->command = "pri destroy span";
 		e->usage =
 			"Usage: pri destroy span <span>\n"
-			"       Destorys D-channel of span and its B-channels.\n"
+			"       Destroys D-channel of span and its B-channels.\n"
 			"	DON'T USE THIS UNLESS YOU KNOW WHAT YOU ARE DOING.\n";
 		return NULL;
 	case CLI_GENERATE:
@@ -15561,7 +15654,6 @@ static void mfcr2_show_links_of(struct ast_cli_args *a, struct r2links *list_hea
 #define FORMAT "%-5s %-10s %-15s %-10s %s\n"
 	AST_LIST_LOCK(list_head);
 	if (! AST_LIST_EMPTY(list_head)) {
-		int x = 0;
 		char index[5];
 		char live_chans_str[5];
 		char channel_list[R2_LINK_CAPACITY * 4];
@@ -15576,7 +15668,7 @@ static void mfcr2_show_links_of(struct ast_cli_args *a, struct r2links *list_hea
 			int inside_range;
 			int channo;
 			int prev_channo;
-			x++;
+
 			if (mfcr2->r2master == 0L) {
 				thread_status = "zero";
 			} else if (mfcr2->r2master == AST_PTHREADT_NULL) {
@@ -15670,7 +15762,7 @@ static char *handle_mfcr2_destroy_link(struct ast_cli_entry *e, int cmd, struct 
 		e->command = "mfcr2 destroy link";
 		e->usage =
 			"Usage: mfcr2 destroy link <index-number>\n"
-			"       Destorys D-channel of link and its B-channels.\n"
+			"       Destroys D-channel of link and its B-channels.\n"
 			"	DON'T USE THIS UNLESS YOU KNOW WHAT YOU ARE DOING.\n";
 		return NULL;
 	case CLI_GENERATE:
@@ -16786,6 +16878,206 @@ static struct dahdi_pvt *find_channel_from_str(const char *channel)
 
 	return find_channel(chan_num);
 }
+
+static int print_subchannel(struct dahdi_pvt *p, int subchan, char *buffer, size_t len)
+{
+	if (!p->subs[subchan].owner) {
+		return -1;
+	}
+	ast_channel_lock(p->subs[subchan].owner);
+	snprintf(buffer, len, "%s", ast_channel_name(p->subs[subchan].owner));
+	ast_channel_unlock(p->subs[subchan].owner);
+	return 0;
+}
+
+#define REQUIRE_FXO_SIG() \
+	if (!(dahdip->sigtype & __DAHDI_SIG_FXO)) { \
+		ast_log(LOG_WARNING, "DAHDI channel %d is not FXO signalled\n", p->channel); \
+		return -1; \
+	}
+
+static int dahdichan_read_property(struct dahdi_pvt *p, struct dahdi_params *dahdip, const char *property, char *buffer, size_t len)
+{
+	struct analog_pvt *analog_p = p->sig_pvt;
+
+	/* R/O properties */
+	if (!strcasecmp(property, "owner")) {
+		return print_subchannel(p, SUB_REAL, buffer, len);
+	} else if (!strcasecmp(property, "callwait")) {
+		return print_subchannel(p, SUB_CALLWAIT, buffer, len);
+	} else if (!strcasecmp(property, "threeway")) {
+		return print_subchannel(p, SUB_THREEWAY, buffer, len);
+	/* R/W properties */
+	} else if (!strcasecmp(property, "polarity")) {
+		REQUIRE_FXO_SIG();
+		snprintf(buffer, len, "%d", p->polarity);
+	} else if (!strcasecmp(property, "dnd")) {
+		REQUIRE_FXO_SIG();
+		snprintf(buffer, len, "%d", analog_p->dnd);
+	} else if (!strcasecmp(property, "callforward")) {
+		REQUIRE_FXO_SIG();
+		snprintf(buffer, len, "%s", analog_p->call_forward);
+	} else if (!strcasecmp(property, "lastexten")) {
+		REQUIRE_FXO_SIG();
+		snprintf(buffer, len, "%s", analog_p->lastexten);
+	} else {
+		ast_log(LOG_ERROR, "Unknown DAHDI_CHANNEL property '%s'\n", property);
+		return -1;
+	}
+	return 0;
+}
+
+static int dahdichan_write_property(struct dahdi_pvt *p, struct dahdi_params *dahdip, const char *property, const char *value)
+{
+	struct analog_pvt *analog_p = p->sig_pvt;
+
+	/* We don't need to check ast_strlen_zero(value) because it's obviously not NULL.
+	 * It may even be okay for it to be an empty string, but that's a per-setting thing. */
+
+	/* R/O properties */
+	if (!strcasecmp(property, "owner") || !strcasecmp(property, "callwait") || !strcasecmp(property, "threeway")) {
+		ast_log(LOG_ERROR, "DAHDI subchannel names are R/O\n");
+		return -1;
+	/* R/W properties */
+	} else if (!strcasecmp(property, "polarity")) {
+		int polarity = atoi(value);
+		REQUIRE_FXO_SIG();
+		if (polarity != POLARITY_IDLE && polarity != POLARITY_REV) {
+			ast_log(LOG_ERROR, "Invalid polarity: '%s'\n", value);
+			return -1;
+		}
+		my_set_polarity(p, polarity);
+	} else if (!strcasecmp(property, "dnd")) {
+		int dnd = atoi(value);
+		REQUIRE_FXO_SIG();
+		analog_dnd(analog_p, dnd ? 1 : 0);
+	} else if (!strcasecmp(property, "callforward")) {
+		REQUIRE_FXO_SIG();
+		if (strlen(value) >= sizeof(analog_p->call_forward) - 1) {
+			ast_log(LOG_ERROR, "Provided call forwarding target '%s' is too long\n", value);
+		}
+		ast_copy_string(analog_p->call_forward, value, sizeof(analog_p->call_forward)); /* Could be empty to clear value */
+	} else if (!strcasecmp(property, "lastexten")) {
+		REQUIRE_FXO_SIG();
+		if (strlen(value) >= sizeof(analog_p->lastexten) - 1) {
+			ast_log(LOG_ERROR, "Provided lastexten target '%s' is too long\n", value);
+		}
+		ast_copy_string(analog_p->lastexten, value, sizeof(analog_p->lastexten)); /* Could be empty to clear value */
+	} else {
+		ast_log(LOG_ERROR, "Unknown DAHDI_CHANNEL property '%s'\n", property);
+		return -1;
+	}
+	return 0;
+}
+#undef REQUIRE_FXO_SIG
+
+static int dahdichan_helper(struct ast_channel *chan, char *data, const char *value, char *buffer, size_t buflen)
+{
+	char *parse;
+	struct dahdi_pvt *pvt;
+	struct dahdi_params dahdip;
+	int res;
+	AST_DECLARE_APP_ARGS(args,
+		AST_APP_ARG(property);
+		AST_APP_ARG(dahdichan);
+	);
+
+	parse = ast_strdupa(data);
+	AST_STANDARD_APP_ARGS(args, parse);
+
+	if (buflen > 0) {
+		*buffer = '\0';
+	}
+
+	if (!ast_strlen_zero(args.dahdichan)) {
+		/* DAHDI channel number explicitly provided, find it. */
+		int channo = atoi(args.dahdichan);
+		pvt = find_channel(channo);
+		if (!pvt) {
+			ast_log(LOG_ERROR, "DAHDI channel %d does not exist\n", channo);
+			return -1;
+		}
+	} else {
+		/* No channel specified explicitly, so implicitly use the current channel, in which case it must be a DAHDI channel. */
+		if (!chan || !ast_channel_tech(chan) || strcasecmp(ast_channel_tech(chan)->type, "DAHDI")) {
+			ast_log(LOG_WARNING, "%s is not a DAHDI channel, and no DAHDI channel specified\n", ast_channel_name(chan));
+			return -1;
+		}
+		pvt = ast_channel_tech_pvt(chan);
+	}
+
+	memset(&dahdip, 0, sizeof(dahdip));
+	if (ioctl(pvt->subs[SUB_REAL].dfd, DAHDI_GET_PARAMS, &dahdip)) {
+		ast_log(LOG_WARNING, "Unable to get parameters of DAHDI channel %d: %s\n", pvt->channel, strerror(errno));
+		return -1;
+	}
+
+	/* We have the channel private to use. */
+	ast_mutex_lock(&pvt->lock);
+	if (value) {
+		res = dahdichan_write_property(pvt, &dahdip, args.property, value);
+	} else {
+		res = dahdichan_read_property(pvt, &dahdip, args.property, buffer, buflen);
+	}
+	ast_mutex_unlock(&pvt->lock);
+	return res;
+}
+
+static int dahdichan_read(struct ast_channel *chan, const char *cmd, char *data, char *buffer, size_t buflen)
+{
+	return dahdichan_helper(chan, data, NULL, buffer, buflen);
+}
+
+static int dahdichan_write(struct ast_channel *chan, const char *cmd, char *data, const char *value)
+{
+	return dahdichan_helper(chan, data, value, NULL, 0);
+}
+
+static struct ast_custom_function dahdichan_function = {
+	.name = "DAHDI_CHANNEL",
+	.write = dahdichan_write,
+	.read = dahdichan_read,
+};
+
+/*! \todo The standalone POLARITY function can and should be deprecated/removed, since its functionality is now part of DAHDI_CHANNEL. */
+
+static int polarity_read(struct ast_channel *chan, const char *cmd, char *data, char *buffer, size_t buflen)
+{
+	struct dahdi_params dahdip;
+	struct dahdi_pvt *pvt = ast_channel_tech_pvt(chan);
+	if (strcasecmp(ast_channel_tech(chan)->type, "DAHDI")) {
+		ast_log(LOG_WARNING, "%s is not a DAHDI channel\n", ast_channel_name(chan));
+		return -1;
+	}
+	memset(&dahdip, 0, sizeof(dahdip));
+	if (ioctl(pvt->subs[SUB_REAL].dfd, DAHDI_GET_PARAMS, &dahdip)) {
+		ast_log(LOG_WARNING, "Unable to get parameters of DAHDI channel %d: %s\n", pvt->subs[SUB_REAL].dfd, strerror(errno));
+		return -1;
+	}
+	return dahdichan_read_property(ast_channel_tech_pvt(chan), &dahdip, "polarity", buffer, buflen);
+}
+
+static int polarity_write(struct ast_channel *chan, const char *cmd, char *data, const char *value)
+{
+	struct dahdi_params dahdip;
+	struct dahdi_pvt *pvt = ast_channel_tech_pvt(chan);
+	if (strcasecmp(ast_channel_tech(chan)->type, "DAHDI")) {
+		ast_log(LOG_WARNING, "%s is not a DAHDI channel\n", ast_channel_name(chan));
+		return -1;
+	}
+	memset(&dahdip, 0, sizeof(dahdip));
+	if (ioctl(pvt->subs[SUB_REAL].dfd, DAHDI_GET_PARAMS, &dahdip)) {
+		ast_log(LOG_WARNING, "Unable to get parameters of DAHDI channel %d: %s\n", pvt->subs[SUB_REAL].dfd, strerror(errno));
+		return -1;
+	}
+	return dahdichan_write_property(ast_channel_tech_pvt(chan), &dahdip, "polarity", value);
+}
+
+static struct ast_custom_function polarity_function = {
+	.name = "POLARITY",
+	.write = polarity_write,
+	.read = polarity_read,
+};
 
 static int action_dahdidndon(struct mansession *s, const struct message *m)
 {
@@ -18140,6 +18432,7 @@ static int __unload_module(void)
 	ast_unregister_application(dahdi_accept_r2_call_app);
 #endif
 
+	ast_custom_function_unregister(&dahdichan_function);
 	ast_custom_function_unregister(&polarity_function);
 
 	ast_cli_unregister_multiple(dahdi_cli, ARRAY_LEN(dahdi_cli));
@@ -18430,14 +18723,14 @@ static int dahdi_datetime_send_option(const char *value)
 
 /*! process_dahdi() - ignore keyword 'channel' and similar */
 #define PROC_DAHDI_OPT_NOCHAN  (1 << 0)
-/*! process_dahdi() - No warnings on non-existing cofiguration keywords */
+/*! process_dahdi() - No warnings on non-existing configuration keywords */
 #define PROC_DAHDI_OPT_NOWARN  (1 << 1)
 
 static void parse_busy_pattern(struct ast_variable *v, struct ast_dsp_busy_pattern *busy_cadence)
 {
 	int count_pattern = 0;
 	int norval = 0;
-	char *temp = NULL;
+	const char *temp = NULL;
 
 	for (; ;) {
 		/* Scans the string for the next value in the pattern. If none, it checks to see if any have been entered so far. */
@@ -18607,6 +18900,8 @@ static int process_dahdi(struct dahdi_chan_conf *confp, const char *cat, struct 
 			parse_busy_pattern(v, &confp->chan.busy_cadence);
 		} else if (!strcasecmp(v->name, "calledsubscriberheld")) {
 			confp->chan.calledsubscriberheld = ast_true(v->value);
+		} else if (!strcasecmp(v->name, "lastnumredial")) {
+			confp->chan.lastnumredial = ast_true(v->value);
 		} else if (!strcasecmp(v->name, "callprogress")) {
 			confp->chan.callprogress &= ~CALLPROGRESS_PROGRESS;
 			if (ast_true(v->value))
@@ -18675,6 +18970,8 @@ static int process_dahdi(struct dahdi_chan_conf *confp, const char *cat, struct 
 			confp->chan.callwaiting = ast_true(v->value);
 		} else if (!strcasecmp(v->name, "callwaitingcallerid")) {
 			confp->chan.callwaitingcallerid = ast_true(v->value);
+		} else if (!strcasecmp(v->name, "callwaitingdeluxe")) {
+			confp->chan.callwaitingdeluxe = ast_true(v->value);
 		} else if (!strcasecmp(v->name, "context")) {
 			ast_copy_string(confp->chan.context, v->value, sizeof(confp->chan.context));
 		} else if (!strcasecmp(v->name, "language")) {
@@ -18745,13 +19042,13 @@ static int process_dahdi(struct dahdi_chan_conf *confp, const char *cat, struct 
 			confp->chan.transfertobusy = ast_true(v->value);
 		} else if (!strcasecmp(v->name, "dialmode")) {
 			if (!strcasecmp(v->value, "pulse")) {
-				confp->chan.dialmode = ANALOG_DIALMODE_PULSE;
+				confp->chan.permdialmode = ANALOG_DIALMODE_PULSE;
 			} else if (!strcasecmp(v->value, "dtmf") || !strcasecmp(v->value, "tone")) {
-				confp->chan.dialmode = ANALOG_DIALMODE_DTMF;
+				confp->chan.permdialmode = ANALOG_DIALMODE_DTMF;
 			} else if (!strcasecmp(v->value, "none")) {
-				confp->chan.dialmode = ANALOG_DIALMODE_NONE;
+				confp->chan.permdialmode = ANALOG_DIALMODE_NONE;
 			} else {
-				confp->chan.dialmode = ANALOG_DIALMODE_BOTH;
+				confp->chan.permdialmode = ANALOG_DIALMODE_BOTH;
 			}
 		} else if (!strcasecmp(v->name, "mwimonitor")) {
 			confp->chan.mwimonitor_neon = 0;
@@ -19538,7 +19835,8 @@ static int process_dahdi(struct dahdi_chan_conf *confp, const char *cat, struct 
 				}
 				if (!link->ss7.ss7) {
 					ast_log(LOG_ERROR, "Please specify isup timers after sigchan!\n");
-				} else if (!ss7_set_isup_timer(link->ss7.ss7, strstr(v->name, ".") + 1, atoi(v->value))) {
+					/*! \todo Remove cast after libss7 API is changed to const char */
+				} else if (!ss7_set_isup_timer(link->ss7.ss7, (char*) strstr(v->name, ".") + 1, atoi(v->value))) {
 					ast_log(LOG_ERROR, "Invalid isup timer %s\n", v->name);
 				}
 			} else if (!strncasecmp(v->name, "mtp3_timer.", 11)) {
@@ -19550,7 +19848,8 @@ static int process_dahdi(struct dahdi_chan_conf *confp, const char *cat, struct 
 				}
 				if (!link->ss7.ss7) {
 					ast_log(LOG_ERROR, "Please specify mtp3 timers after sigchan!\n");
-				} else if (!ss7_set_mtp3_timer(link->ss7.ss7, strstr(v->name, ".") + 1, atoi(v->value))) {
+					/*! \todo Remove cast after libss7 API is changed to const char */
+				} else if (!ss7_set_mtp3_timer(link->ss7.ss7, (char*) strstr(v->name, ".") + 1, atoi(v->value))) {
 					ast_log(LOG_ERROR, "Invalid mtp3 timer %s\n", v->name);
 				}
 			} else if (!strcasecmp(v->name, "inr_if_no_calling")) {
@@ -19964,7 +20263,7 @@ static int setup_dahdi_int(int reload, struct dahdi_chan_conf *default_conf, str
 	int res;
 
 #ifdef HAVE_PRI
-	char *c;
+	const char *c;
 	int spanno;
 	int i;
 	int logicalspan;
@@ -20055,7 +20354,7 @@ static int setup_dahdi_int(int reload, struct dahdi_chan_conf *default_conf, str
 						while (c && (i < SIG_PRI_NUM_DCHANS)) {
 							dchannels[i] = atoi(c + 1);
 							if (dchannels[i] < 0) {
-								ast_log(LOG_WARNING, "D-channel for trunk group %d must be a postiive number at line %d of chan_dahdi.conf\n", trunkgroup, v->lineno);
+								ast_log(LOG_WARNING, "D-channel for trunk group %d must be a positive number at line %d of chan_dahdi.conf\n", trunkgroup, v->lineno);
 							} else
 								i++;
 							c = strchr(c + 1, ',');
@@ -20087,13 +20386,13 @@ static int setup_dahdi_int(int reload, struct dahdi_chan_conf *default_conf, str
 							} else
 									ast_verb(2, "Mapped span %d to trunk group %d (logical span %d)\n", spanno, trunkgroup, logicalspan);
 							} else
-								ast_log(LOG_WARNING, "Logical span must be a postive number, or '0' (for unspecified) at line %d of chan_dahdi.conf\n", v->lineno);
+								ast_log(LOG_WARNING, "Logical span must be a positive number, or '0' (for unspecified) at line %d of chan_dahdi.conf\n", v->lineno);
 						} else
-							ast_log(LOG_WARNING, "Trunk group must be a postive number at line %d of chan_dahdi.conf\n", v->lineno);
+							ast_log(LOG_WARNING, "Trunk group must be a positive number at line %d of chan_dahdi.conf\n", v->lineno);
 					} else
 						ast_log(LOG_WARNING, "Missing trunk group for span map at line %d of chan_dahdi.conf\n", v->lineno);
 				} else
-					ast_log(LOG_WARNING, "Span number must be a postive integer at line %d of chan_dahdi.conf\n", v->lineno);
+					ast_log(LOG_WARNING, "Span number must be a positive integer at line %d of chan_dahdi.conf\n", v->lineno);
 			} else {
 				ast_log(LOG_NOTICE, "Ignoring unknown keyword '%s' in trunkgroups\n", v->name);
 			}
@@ -20361,6 +20660,7 @@ static int load_module(void)
 	ast_register_application_xml(dahdi_accept_r2_call_app, dahdi_accept_r2_call_exec);
 #endif
 
+	ast_custom_function_register(&dahdichan_function);
 	ast_custom_function_register(&polarity_function);
 
 	ast_cli_register_multiple(dahdi_cli, ARRAY_LEN(dahdi_cli));

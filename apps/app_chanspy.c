@@ -62,6 +62,9 @@
 
 /*** DOCUMENTATION
 	<application name="ChanSpy" language="en_US">
+		<since>
+			<version>1.2.0</version>
+		</since>
 		<synopsis>
 			Listen to a channel, and optionally whisper into it.
 		</synopsis>
@@ -128,6 +131,9 @@
 						for the name).</para>
 						<argument name="mailbox" />
 						<argument name="context" />
+					</option>
+					<option name="N">
+						<para>Do not answer the channel automatically.</para>
 					</option>
 					<option name="o">
 						<para>Only listen to audio coming from this channel.</para>
@@ -204,6 +210,9 @@
 		</see-also>
 	</application>
 	<application name="ExtenSpy" language="en_US">
+		<since>
+			<version>1.4.0</version>
+		</since>
 		<synopsis>
 			Listen to a channel, and optionally whisper into it.
 		</synopsis>
@@ -283,6 +292,9 @@
 						<argument name="mailbox" />
 						<argument name="context" />
 					</option>
+					<option name="N">
+						<para>Do not answer the channel automatically.</para>
+					</option>
 					<option name="o">
 						<para>Only listen to audio coming from this channel.</para>
 					</option>
@@ -351,6 +363,9 @@
 		</see-also>
 	</application>
 	<application name="DAHDIScan" language="en_US">
+		<since>
+			<version>1.4.22</version>
+		</since>
 		<synopsis>
 			Scan DAHDI channels to monitor calls.
 		</synopsis>
@@ -399,6 +414,7 @@ enum {
 	OPTION_UNIQUEID          = (1 << 19),	/* The chanprefix is a channel uniqueid or fully specified channel name. */
 	OPTION_LONG_QUEUE        = (1 << 20),	/* Allow usage of a long queue to store audio frames. */
 	OPTION_INTERLEAVED       = (1 << 21),	/* Interleave the Read and Write frames in the output frame. */
+	OPTION_NOANSWER          = (1 << 22),	/* Do not automatically answer the channel */
 };
 
 enum {
@@ -423,6 +439,7 @@ AST_APP_OPTIONS(spy_opts, {
 	AST_APP_OPTION_ARG('g', OPTION_GROUP, OPT_ARG_GROUP),
 	AST_APP_OPTION('l', OPTION_LONG_QUEUE),
 	AST_APP_OPTION_ARG('n', OPTION_NAME, OPT_ARG_NAME),
+	AST_APP_OPTION('N', OPTION_NOANSWER),
 	AST_APP_OPTION('o', OPTION_READONLY),
 	AST_APP_OPTION('q', OPTION_QUIET),
 	AST_APP_OPTION_ARG('r', OPTION_RECORD, OPT_ARG_RECORD),
@@ -570,12 +587,32 @@ static int start_spying(struct ast_autochan *autochan, const char *spychan_name,
 		spychan_name, ast_channel_name(autochan->chan));
 
 	if (ast_test_flag(flags, OPTION_READONLY)) {
+		ast_audiohook_set_frame_feed_direction(audiohook, AST_AUDIOHOOK_DIRECTION_READ);
 		ast_set_flag(audiohook, AST_AUDIOHOOK_MUTE_WRITE);
 	} else {
 		ast_set_flag(audiohook, AST_AUDIOHOOK_TRIGGER_SYNC);
 	}
 	if (ast_test_flag(flags, OPTION_LONG_QUEUE)) {
 		ast_debug(9, "Using a long queue to store audio frames in spy audiohook\n");
+	} else {
+		ast_set_flag(audiohook, AST_AUDIOHOOK_SMALL_QUEUE);
+	}
+	res = ast_audiohook_attach(autochan->chan, audiohook);
+	ast_autochan_channel_unlock(autochan);
+	return res;
+}
+
+static int start_whispering(struct ast_autochan *autochan, const char *spychan_name, struct ast_audiohook *audiohook, struct ast_flags *flags)
+{
+	int res;
+
+	ast_autochan_channel_lock(autochan);
+	ast_verb(3, "Attaching spy channel %s to %s\n",
+		spychan_name, ast_channel_name(autochan->chan));
+
+	ast_set_flag(audiohook, AST_AUDIOHOOK_TRIGGER_SYNC);
+	if (ast_test_flag(flags, OPTION_LONG_QUEUE)) {
+		ast_debug(9, "Using a long queue to store audio frames in whisper audiohook\n");
 	} else {
 		ast_set_flag(audiohook, AST_AUDIOHOOK_SMALL_QUEUE);
 	}
@@ -684,7 +721,7 @@ static int attach_barge(struct ast_autochan *spyee_autochan,
 		return -1;
 	}
 
-	if (start_spying(internal_bridge_autochan, spyer_name, bridge_whisper_audiohook, flags)) {
+	if (start_whispering(internal_bridge_autochan, spyer_name, bridge_whisper_audiohook, flags)) {
 		ast_log(LOG_WARNING, "Unable to attach barge audiohook on spyee '%s'. Barge mode disabled.\n", name);
 		retval = -1;
 	}
@@ -746,7 +783,7 @@ static int channel_spy(struct ast_channel *chan, struct ast_autochan *spyee_auto
 		*/
 		ast_audiohook_init(&csth.whisper_audiohook, AST_AUDIOHOOK_TYPE_WHISPER, "ChanSpy", 0);
 
-		if (start_spying(spyee_autochan, spyer_name, &csth.whisper_audiohook, flags)) {
+		if (start_whispering(spyee_autochan, spyer_name, &csth.whisper_audiohook, flags)) {
 			ast_log(LOG_WARNING, "Unable to attach whisper audiohook to spyee %s. Whisper mode disabled!\n", name);
 		}
 	}
@@ -970,8 +1007,9 @@ static int common_exec(struct ast_channel *chan, struct ast_flags *flags,
 		ast_channel_unlock(chan);
 	}
 
-	if (ast_channel_state(chan) != AST_STATE_UP)
+	if (!ast_test_flag(flags, OPTION_NOANSWER) && ast_channel_state(chan) != AST_STATE_UP) {
 		ast_answer(chan);
+	}
 
 	ast_channel_set_flag(chan, AST_FLAG_SPYING);
 

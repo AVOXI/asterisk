@@ -1045,7 +1045,7 @@ static void *mwi_get_notify_data(struct ast_sip_subscription *sub)
 	struct mwi_subscription *mwi_sub;
 	struct ast_datastore *mwi_datastore;
 	struct ast_sip_aor *aor;
-	struct ast_sip_endpoint *endpoint = ast_sip_subscription_get_endpoint(sub);
+	struct ast_sip_endpoint *endpoint = NULL;
 
 	mwi_datastore = ast_sip_subscription_get_datastore(sub, MWI_DATASTORE);
 	if (!mwi_datastore) {
@@ -1059,6 +1059,7 @@ static void *mwi_get_notify_data(struct ast_sip_subscription *sub)
 		return NULL;
 	}
 
+	endpoint = ast_sip_subscription_get_endpoint(sub);
 	if ((aor = find_aor_for_resource(endpoint, ast_sip_subscription_get_resource_name(sub)))) {
 		pjsip_dialog *dlg = ast_sip_subscription_get_dialog(sub);
 		pjsip_sip_uri *sip_uri = ast_sip_subscription_get_sip_uri(sub);
@@ -1573,8 +1574,8 @@ static int load_module(void)
 		return AST_MODULE_LOAD_DECLINE;
 	}
 
-	mwi_serializer_pool = ast_serializer_pool_create("pjsip/mwi",
-		MWI_SERIALIZER_POOL_SIZE, ast_sip_threadpool(), MAX_UNLOAD_TIMEOUT_TIME);
+	mwi_serializer_pool = ast_serializer_taskpool_create("pjsip/mwi",
+		MWI_SERIALIZER_POOL_SIZE, ast_sip_taskpool(), MAX_UNLOAD_TIMEOUT_TIME);
 	if (!mwi_serializer_pool) {
 		ast_log(AST_LOG_WARNING, "Failed to create MWI serializer pool. The default SIP pool will be used for MWI\n");
 	}
@@ -1603,7 +1604,7 @@ static int load_module(void)
 
 	if (!ast_sip_get_mwi_disable_initial_unsolicited()) {
 		create_mwi_subscriptions();
-		if (ast_test_flag(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)) {
+		if (ast_fully_booted) {
 			ast_sip_push_task(ast_serializer_pool_get(mwi_serializer_pool),
 				send_initial_notify_all, NULL);
 		} else {

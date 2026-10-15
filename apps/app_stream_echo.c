@@ -38,6 +38,9 @@
 
 /*** DOCUMENTATION
 	<application name="StreamEcho" language="en_US">
+		<since>
+			<version>15.0.0</version>
+		</since>
 		<synopsis>
 			Echo media, up to 'N' streams of a type, and DTMF back to the calling party
 		</synopsis>
@@ -75,7 +78,7 @@
 
 static const char app[] = "StreamEcho";
 
-static int stream_echo_write_error(struct ast_channel *chan, struct ast_frame *frame, int pos)
+static int stream_echo_write_error(struct ast_channel *chan, int stream_num, struct ast_frame *frame)
 {
 	char frame_type[32];
 	const char *media_type;
@@ -83,9 +86,13 @@ static int stream_echo_write_error(struct ast_channel *chan, struct ast_frame *f
 
 	ast_frame_type2str(frame->frametype, frame_type, sizeof(frame_type));
 
-	stream = pos < 0 ?
+	stream = stream_num < 0 ?
 		ast_channel_get_default_stream(chan, ast_format_get_type(frame->subclass.format)) :
-		ast_stream_topology_get_stream(ast_channel_get_stream_topology(chan), pos);
+		ast_stream_topology_get_stream(ast_channel_get_stream_topology(chan), stream_num);
+
+	if (!stream) {
+		return -1;
+	}
 
 	media_type = ast_codec_media_type2str(ast_stream_get_type(stream));
 
@@ -109,7 +116,7 @@ static int stream_echo_write(struct ast_channel *chan, struct ast_frame *frame,
 	 */
 	num = ast_channel_is_multistream(chan) ? frame->stream_num : -1;
 	if (ast_write_stream(chan, num, frame)) {
-		return stream_echo_write_error(chan, frame, num);
+		return stream_echo_write_error(chan, num, frame);
 	}
 
 	/*
@@ -143,7 +150,7 @@ static int stream_echo_write(struct ast_channel *chan, struct ast_frame *frame,
 		struct ast_stream *stream = ast_stream_topology_get_stream(topology, i);
 		if (num != i && ast_stream_get_type(stream) == type) {
 			if (ast_write_stream(chan, i, frame)) {
-				return stream_echo_write_error(chan, frame, i);
+				return stream_echo_write_error(chan, i, frame);
 			}
 		}
 	}

@@ -39,12 +39,16 @@
 #include "asterisk/module.h"
 #include "asterisk/paths.h"
 #include "asterisk/pbx.h"
+#include "asterisk/format_cache.h"
 #include "asterisk/stasis_channels.h"
 #include "asterisk/test.h"
 #include "pbx_private.h"
 
 /*** DOCUMENTATION
 	<application name="Set" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Set channel variable or function value.
 		</synopsis>
@@ -75,6 +79,9 @@
 		</see-also>
 	</application>
 	<application name="MSet" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Set channel variable(s) or function value(s).
 		</synopsis>
@@ -435,7 +442,7 @@ void ast_str_substitute_variables_full2(struct ast_str **buf, ssize_t maxlen,
 		ast_str_reset(substr3);
 
 		/* Determine how much simply needs to be copied to the output buf. */
-		nextthing = strchr(whereweare, '$');
+		nextthing = strchr((char *)whereweare, '$');
 		if (nextthing) {
 			pos = nextthing - whereweare;
 			switch (nextthing[1]) {
@@ -704,7 +711,7 @@ void pbx_substitute_variables_helper_full_location(struct ast_channel *c, struct
 		int len;
 
 		/* Determine how much simply needs to be copied to the output buf. */
-		nextthing = strchr(whereweare, '$');
+		nextthing = strchr((char *)whereweare, '$');
 		if (nextthing) {
 			pos = nextthing - whereweare;
 			switch (nextthing[1]) {
@@ -978,13 +985,19 @@ static char *handle_show_chanvar(struct ast_cli_entry *e, int cmd, struct ast_cl
 	return CLI_SUCCESS;
 }
 
+static const struct ast_channel_tech mock_channel_tech = {
+};
+
+static int cli_chan = 0;
+
 /*! \brief CLI support for executing function */
 static char *handle_eval_function(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct ast_channel *c = NULL;
-	char *fn, *substituted;
+	const char *fn, *substituted;
 	int ret;
 	char workspace[1024];
+	RAII_VAR(struct ast_format_cap *, caps, NULL, ao2_cleanup);
 
 	switch (cmd) {
 	case CLI_INIT:
@@ -1004,19 +1017,51 @@ static char *handle_eval_function(struct ast_cli_entry *e, int cmd, struct ast_c
 		return CLI_SHOWUSAGE;
 	}
 
-	c = ast_dummy_channel_alloc();
-	if (!c) {
-		ast_cli(a->fd, "Unable to allocate bogus channel for function evaluation.\n");
+	if (a->argc != e->args + 1 && a->argc != e->args + 2) {
+		return CLI_SHOWUSAGE;
+	}
+
+	caps = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+	if (!caps) {
+		ast_log(LOG_WARNING, "Could not allocate an empty format capabilities structure\n");
 		return CLI_FAILURE;
 	}
 
-	fn = (char *) a->argv[3];
+	if (ast_format_cap_append(caps, ast_format_ulaw, 0)) {
+		ast_log(LOG_WARNING, "Failed to append a ulaw format to capabilities for channel nativeformats\n");
+		return CLI_FAILURE;
+	}
+
+	if (ast_format_cap_append(caps, ast_format_alaw, 0)) {
+		ast_log(LOG_WARNING, "Failed to append an alaw format to capabilities for channel nativeformats\n");
+		return CLI_FAILURE;
+	}
+
+	if (ast_format_cap_append(caps, ast_format_h264, 0)) {
+		ast_log(LOG_WARNING, "Failed to append an h264 format to capabilities for channel nativeformats\n");
+		return CLI_FAILURE;
+	}
+
+	c = ast_channel_alloc(0, AST_STATE_DOWN, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, "CLIEval/%d", ++cli_chan);
+	if (!c) {
+		ast_cli(a->fd, "Unable to allocate mock channel for application execution.\n");
+		return CLI_FAILURE;
+	}
+	ast_channel_tech_set(c, &mock_channel_tech);
+	ast_channel_nativeformats_set(c, caps);
+	ast_channel_set_writeformat(c, ast_format_slin);
+	ast_channel_set_rawwriteformat(c, ast_format_slin);
+	ast_channel_set_readformat(c, ast_format_slin);
+	ast_channel_set_rawreadformat(c, ast_format_slin);
+	ast_channel_unlock(c);
+
+	fn = a->argv[3];
 	pbx_substitute_variables_helper(c, fn, workspace, sizeof(workspace));
 	substituted = ast_strdupa(workspace);
 	workspace[0] = '\0';
 	ret = ast_func_read(c, substituted, workspace, sizeof(workspace));
 
-	c = ast_channel_unref(c);
+	ast_hangup(c); /* no need to unref separately */
 
 	ast_cli(a->fd, "Return Value: %s (%d)\n", ret ? "Failure" : "Success", ret);
 	ast_cli(a->fd, "Result: %s\n", workspace);

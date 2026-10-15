@@ -62,6 +62,7 @@ const char *param_name ## _to_str(enum param_name ## _enum value) \
 }
 
 generate_bool_handler_functions(use_rfc9410_responses);
+generate_bool_handler_functions(ignore_sip_date_header);
 generate_bool_handler_functions(send_mky);
 generate_bool_handler_functions(check_tn_cert_public_url);
 generate_bool_handler_functions(relax_x5u_port_scheme_restrictions);
@@ -100,6 +101,7 @@ const char *param_name ## _to_str( \
 }
 
 generate_enum_string_functions(attest_level, UNKNOWN,
+	{attest_level_NOT_SET, "not_set"},
 	{attest_level_A, "A"},
 	{attest_level_B, "B"},
 	{attest_level_C, "C"},
@@ -304,6 +306,7 @@ static char *cli_verify_cert(struct ast_cli_entry *e, int cmd, struct ast_cli_ar
 	RAII_VAR(struct verification_cfg *, vs_cfg, NULL, ao2_cleanup);
 	struct crypto_cert_store *tcs;
 	X509 *cert = NULL;
+	STACK_OF(X509) *cert_chain = NULL;
 	const char *errmsg = NULL;
 
 	switch(cmd) {
@@ -345,18 +348,21 @@ static char *cli_verify_cert(struct ast_cli_entry *e, int cmd, struct ast_cli_ar
 		tcs = vs_cfg->vcfg_common.tcs;
 	}
 
-	cert = crypto_load_cert_from_file(a->argv[3]);
+	cert = crypto_load_cert_chain_from_file(a->argv[3], &cert_chain);
 	if (!cert) {
 		ast_cli(a->fd, "Failed to load certificate from %s.  See log for details\n", a->argv[3]);
 		return CLI_SUCCESS;
 	}
 
-	if (crypto_is_cert_trusted(tcs, cert, &errmsg)) {
+	if (crypto_is_cert_trusted(tcs, cert, cert_chain, &errmsg)) {
 		ast_cli(a->fd, "Certificate %s trusted\n", a->argv[3]);
 	} else {
 		ast_cli(a->fd, "Certificate %s NOT trusted: %s\n", a->argv[3], errmsg);
 	}
 	X509_free(cert);
+	if (cert_chain) {
+		sk_X509_pop_free(cert_chain, X509_free);
+	}
 
 	return CLI_SUCCESS;
 }

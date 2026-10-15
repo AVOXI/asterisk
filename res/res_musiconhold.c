@@ -54,6 +54,7 @@
 #include "asterisk/lock.h"
 #include "asterisk/file.h"
 #include "asterisk/channel.h"
+#include "asterisk/cel.h"
 #include "asterisk/pbx.h"
 #include "asterisk/app.h"
 #include "asterisk/module.h"
@@ -79,6 +80,9 @@
 
 /*** DOCUMENTATION
 	<application name="MusicOnHold" language="en_US">
+		<since>
+			<version>0.1.12</version>
+		</since>
 		<synopsis>
 			Play Music On Hold indefinitely.
 		</synopsis>
@@ -97,6 +101,9 @@
 		</description>
 	</application>
 	<application name="StartMusicOnHold" language="en_US">
+		<since>
+			<version>1.2.0</version>
+		</since>
 		<synopsis>
 			Play Music On Hold.
 		</synopsis>
@@ -110,6 +117,9 @@
 		</description>
 	</application>
 	<application name="StopMusicOnHold" language="en_US">
+		<since>
+			<version>1.2.0</version>
+		</since>
 		<synopsis>
 			Stop playing Music On Hold.
 		</synopsis>
@@ -244,9 +254,22 @@ static void moh_post_start(struct ast_channel *chan, const char *moh_class_name)
 {
 	struct stasis_message *message;
 	struct ast_json *json_object;
+	struct ast_json *cel_event;
 
 	ast_verb(3, "Started music on hold, class '%s', on channel '%s'\n",
 		moh_class_name, ast_channel_name(chan));
+
+	cel_event = ast_json_pack("{ s: s, s: {s: s }}",
+		"event", "MOH_STREAM_BEGIN",
+		"extra",
+			"class", moh_class_name
+	);
+	if (cel_event) {
+		ast_cel_publish_event(chan, AST_CEL_STREAM_BEGIN, cel_event);
+	} else {
+		ast_log(LOG_WARNING, "Unable to build extradata for music on hold STREAM_BEGIN event on channel %s", ast_channel_name(chan));
+	}
+	ast_json_unref(cel_event);
 
 	json_object = ast_json_pack("{s: s}", "class", moh_class_name);
 	if (!json_object) {
@@ -268,8 +291,15 @@ static void moh_post_start(struct ast_channel *chan, const char *moh_class_name)
 static void moh_post_stop(struct ast_channel *chan)
 {
 	struct stasis_message *message;
+	struct ast_json *cel_event;
 
 	ast_verb(3, "Stopped music on hold on %s\n", ast_channel_name(chan));
+
+	cel_event = ast_json_pack("{ s: s }", "event", "MOH_STREAM_END");
+	if (cel_event) {
+		ast_cel_publish_event(chan, AST_CEL_STREAM_END, cel_event);
+	}
+	ast_json_unref(cel_event);
 
 	message = ast_channel_blob_create_from_cache(ast_channel_uniqueid(chan),
 		ast_channel_moh_stop_type(), NULL);
@@ -282,6 +312,9 @@ static void moh_post_stop(struct ast_channel *chan)
 	ao2_cleanup(message);
 }
 
+/*
+ * Called with `chan` locked.
+ */
 static void moh_files_release(struct ast_channel *chan, void *data)
 {
 	struct moh_files_state *state;
@@ -314,7 +347,10 @@ static void moh_files_release(struct ast_channel *chan, void *data)
 	state->class = mohclass_unref(state->class, "Unreffing channel's music class upon deactivation of generator");
 }
 
-static int ast_moh_files_next(struct ast_channel *chan)
+/*
+ * Called with `chan` locked.
+ */
+static int moh_files_next(struct ast_channel *chan)
 {
 	struct moh_files_state *state = ast_channel_music_state(chan);
 	struct ast_vector_string *files;
@@ -414,6 +450,9 @@ static int ast_moh_files_next(struct ast_channel *chan)
 	return 0;
 }
 
+/*
+ * Called with `chan` locked.
+ */
 static struct ast_frame *moh_files_readframe(struct ast_channel *chan)
 {
 	struct ast_frame *f;
@@ -421,7 +460,7 @@ static struct ast_frame *moh_files_readframe(struct ast_channel *chan)
 	f = ast_readframe(ast_channel_stream(chan));
 	if (!f) {
 		/* Either there was no file stream setup or we reached EOF. */
-		if (!ast_moh_files_next(chan)) {
+		if (!moh_files_next(chan)) {
 			/*
 			 * Either we resetup the previously saved file stream position
 			 * or we started a new file stream.
@@ -433,7 +472,7 @@ static struct ast_frame *moh_files_readframe(struct ast_channel *chan)
 				 * resetup file stream was saved at EOF when MOH was
 				 * previously stopped.
 				 */
-				if (!ast_moh_files_next(chan)) {
+				if (!moh_files_next(chan)) {
 					f = ast_readframe(ast_channel_stream(chan));
 				}
 			}
@@ -443,6 +482,9 @@ static struct ast_frame *moh_files_readframe(struct ast_channel *chan)
 	return f;
 }
 
+/*
+ * Called with `chan` locked.
+ */
 static void moh_files_write_format_change(struct ast_channel *chan, void *data)
 {
 	struct moh_files_state *state = ast_channel_music_state(chan);
@@ -516,6 +558,9 @@ static int moh_files_generator(struct ast_channel *chan, void *data, int len, in
 	return res;
 }
 
+/*
+ * Called with `chan` locked.
+ */
 static void *moh_files_alloc(struct ast_channel *chan, void *params)
 {
 	struct moh_files_state *state;
@@ -997,6 +1042,9 @@ static struct mohdata *mohalloc(struct mohclass *cl)
 	return moh;
 }
 
+/*
+ * Called with `chan` locked.
+ */
 static void moh_release(struct ast_channel *chan, void *data)
 {
 	struct mohdata *moh = data;
@@ -1034,6 +1082,9 @@ static void moh_release(struct ast_channel *chan, void *data)
 	ao2_cleanup(oldwfmt);
 }
 
+/*
+ * Called with `chan` locked.
+ */
 static void *moh_alloc(struct ast_channel *chan, void *params)
 {
 	struct mohdata *res;
@@ -1245,7 +1296,7 @@ static int on_moh_file(const char *directory, const char *filename, void *obj)
 {
 	struct ast_vector_string *files = obj;
 	char *full_path;
-	char *extension;
+	const char *extension;
 
 	/* Skip files that starts with a dot */
 	if (*filename == '.') {
@@ -1509,10 +1560,15 @@ static int _moh_unregister(struct mohclass *moh, const char *file, int line, con
 	return 0;
 }
 
+/*
+ * Called with `chan` UNLOCKED.
+ */
 static void local_ast_moh_cleanup(struct ast_channel *chan)
 {
-	struct moh_files_state *state = ast_channel_music_state(chan);
+	struct moh_files_state *state;
 
+	ast_channel_lock(chan);
+	state = ast_channel_music_state(chan);
 	if (state) {
 		ast_channel_music_state_set(chan, NULL);
 		if (state->class) {
@@ -1527,6 +1583,7 @@ static void local_ast_moh_cleanup(struct ast_channel *chan)
 		/* Only held a module reference if we had a music state */
 		ast_module_unref(ast_module_info->self);
 	}
+	ast_channel_unlock(chan);
 }
 
 /*! \brief Support routing for 'moh unregister class' CLI
@@ -1675,10 +1732,13 @@ static struct ast_variable *load_realtime_musiconhold(const char *name)
 	return var;
 }
 
+/*
+ * Called with `chan` UNLOCKED.
+ */
 static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, const char *interpclass)
 {
 	struct mohclass *mohclass = NULL;
-	struct moh_files_state *state = ast_channel_music_state(chan);
+	struct moh_files_state *state;
 	struct ast_variable *var = NULL;
 	int res = 0;
 	int i;
@@ -1753,10 +1813,13 @@ static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, con
 
 			if (ast_test_flag(global_flags, MOH_CACHERTCLASSES)) {
 				/* CACHERTCLASSES enabled, let's add this class to default tree */
+				ast_channel_lock(chan);
+				state = ast_channel_music_state(chan);
 				if (state && state->class) {
 					/* Class already exist for this channel */
 					ast_log(LOG_NOTICE, "This channel already has a MOH class attached (%s)!\n", state->class->name);
 				}
+				ast_channel_unlock(chan);
 				/* We don't want moh_register to unref the mohclass because we do it at the end of this function as well.
 				 * If we allowed moh_register to unref the mohclass,too, then the count would be off by one. The result would
 				 * be that the destructor would be called when the generator on the channel is deactivated. The container then
@@ -1827,6 +1890,8 @@ static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, con
 					}
 
 					/* Let's check if this channel already had a moh class before */
+					ast_channel_lock(chan);
+					state = ast_channel_music_state(chan);
 					if (state && state->class) {
 						/* Class already exist for this channel */
 						ast_log(LOG_NOTICE, "This channel already has a MOH class attached (%s)!\n", state->class->name);
@@ -1835,7 +1900,9 @@ static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, con
 							mohclass = mohclass_unref(mohclass, "unreffing potential mohclass (channel already has one)");
 							mohclass = mohclass_ref(state->class, "using existing class from state");
 						}
+						ast_channel_unlock(chan);
 					} else {
+						ast_channel_unlock(chan);
 						if (ast_pthread_create_background(&mohclass->thread, NULL, monmp3thread, mohclass)) {
 							ast_log(LOG_WARNING, "Unable to create moh...\n");
 							if (mohclass->timer) {
@@ -1882,6 +1949,8 @@ static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, con
 		}
 	}
 
+	ast_channel_lock(chan);
+	state = ast_channel_music_state(chan);
 	if (!state || !state->class || strcmp(mohclass->name, state->class->name)) {
 		size_t file_count;
 
@@ -1895,6 +1964,7 @@ static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, con
 			res = ast_activate_generator(chan, &mohgen, mohclass);
 		}
 	}
+	ast_channel_unlock(chan);
 	if (!res) {
 		ast_channel_lock(chan);
 		ast_channel_latest_musicclass_set(chan, mohclass->name);
@@ -1907,6 +1977,9 @@ static int local_ast_moh_start(struct ast_channel *chan, const char *mclass, con
 	return res;
 }
 
+/*
+ * Called with `chan` UNLOCKED.
+ */
 static void local_ast_moh_stop(struct ast_channel *chan)
 {
 	ast_deactivate_generator(chan);

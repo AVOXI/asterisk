@@ -146,7 +146,7 @@ struct dahdi_pvt {
 	 * \note Set to a couple of nonzero values but it is only tested like a boolean.
 	 */
 	int radio;
-	int dialmode;					/*!< Dialing Modes Allowed (Pulse/Tone) */
+	enum analog_dialmode permdialmode;	/*!< Dialing Modes Allowed (Pulse/Tone). Used for reading in chan_dahdi.conf only, the perm setting pair is in sig_analog */
 	int outsigmod;					/*!< Outbound Signalling style (modifier) */
 	int oprmode;					/*!< "Operator Services" mode */
 	struct dahdi_pvt *oprpeer;				/*!< "Operator Services" peer tech_pvt ptr */
@@ -333,6 +333,10 @@ struct dahdi_pvt {
 	 */
 	unsigned int permcallwaiting:1;
 	/*!
+	 * \brief TRUE if Call Waiting Deluxe options should be available
+	 */
+	unsigned int callwaitingdeluxe:1;
+	/*!
 	 * \brief TRUE if the outgoing caller ID is blocked/restricted/hidden.
 	 * \note Set from the "hidecallerid" value read in from chan_dahdi.conf
 	 */
@@ -440,6 +444,8 @@ struct dahdi_pvt {
 	 * \note Used by SS7.  Otherwise set but not used.
 	 */
 	unsigned int inservice:1;
+	/*! *\brief TRUE if last number redial enabled */
+	unsigned int lastnumredial:1;
 	/*!
 	 * \brief Bitmask for the channel being locally blocked.
 	 * \note Applies to SS7 and MFCR2 channels.

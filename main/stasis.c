@@ -33,7 +33,7 @@
 #include "asterisk/stasis_internal.h"
 #include "asterisk/stasis.h"
 #include "asterisk/taskprocessor.h"
-#include "asterisk/threadpool.h"
+#include "asterisk/taskpool.h"
 #include "asterisk/utils.h"
 #include "asterisk/uuid.h"
 #include "asterisk/vector.h"
@@ -46,6 +46,9 @@
 /*** DOCUMENTATION
 	<managerEvent language="en_US" name="UserEvent">
 		<managerEventInstance class="EVENT_FLAG_USER">
+			<since>
+				<version>12.3.0</version>
+			</since>
 			<synopsis>A user defined event raised from the dialplan.</synopsis>
 			<syntax>
 				<channel_snapshot/>
@@ -65,20 +68,83 @@
 	<configInfo name="stasis" language="en_US">
 		<configFile name="stasis.conf">
 			<configObject name="threadpool">
+				<since>
+					<version>12.8.0</version>
+					<version>13.1.0</version>
+				</since>
 				<synopsis>Settings that configure the threadpool Stasis uses to deliver some messages.</synopsis>
 				<configOption name="initial_size" default="5">
+					<since>
+						<version>12.8.0</version>
+						<version>13.1.0</version>
+					</since>
 					<synopsis>Initial number of threads in the message bus threadpool.</synopsis>
 				</configOption>
 				<configOption name="idle_timeout_sec" default="20">
+					<since>
+						<version>12.8.0</version>
+						<version>13.1.0</version>
+					</since>
 					<synopsis>Number of seconds before an idle thread is disposed of.</synopsis>
 				</configOption>
 				<configOption name="max_size" default="50">
+					<since>
+						<version>12.8.0</version>
+						<version>13.1.0</version>
+					</since>
 					<synopsis>Maximum number of threads in the threadpool.</synopsis>
 				</configOption>
 			</configObject>
+			<configObject name="taskpool">
+				<since>
+					<version>23.1.0</version>
+					<version>22.7.0</version>
+					<version>20.17.0</version>
+				</since>
+				<synopsis>Settings that configure the taskpool Stasis uses to deliver some messages.</synopsis>
+				<configOption name="minimum_size" default="5">
+					<since>
+					<version>23.1.0</version>
+					<version>22.7.0</version>
+					<version>20.17.0</version>
+					</since>
+					<synopsis>Minimum number of taskprocessors in the message bus taskpool.</synopsis>
+				</configOption>
+				<configOption name="initial_size" default="5">
+					<since>
+					<version>23.1.0</version>
+					<version>22.7.0</version>
+					<version>20.17.0</version>
+					</since>
+					<synopsis>Initial number of taskprocessors in the message bus taskpool.</synopsis>
+				</configOption>
+				<configOption name="idle_timeout_sec" default="20">
+					<since>
+					<version>23.1.0</version>
+					<version>22.7.0</version>
+					<version>20.17.0</version>
+					</since>
+					<synopsis>Number of seconds before an idle taskprocessor is disposed of.</synopsis>
+				</configOption>
+				<configOption name="max_size" default="50">
+					<since>
+					<version>23.1.0</version>
+					<version>22.7.0</version>
+					<version>20.17.0</version>
+					</since>
+					<synopsis>Maximum number of taskprocessors in the taskpool.</synopsis>
+				</configOption>
+			</configObject>
 			<configObject name="declined_message_types">
+				<since>
+					<version>13.0.0</version>
+				</since>
 				<synopsis>Stasis message types for which to decline creation.</synopsis>
 				<configOption name="decline">
+					<since>
+						<version>12.8.0</version>
+						<version>13.1.0</version>
+					</since>
 					<synopsis>The message type to decline.</synopsis>
 					<description>
 						<para>This configuration option defines the name of the Stasis
@@ -242,7 +308,7 @@
  * subscriptions need the topics to unsubscribe and check subscription status.
  *
  * The cycle is broken by stasis_unsubscribe(). The unsubscribe will remove the
- * topic's reference to a subscription. When the subcription is destroyed, it
+ * topic's reference to a subscription. When the subscription is destroyed, it
  * will remove its reference to the topic.
  *
  * This means that until a subscription has be explicitly unsubscribed, it will
@@ -304,8 +370,8 @@
 /*! The number of buckets to use for topic pools */
 #define TOPIC_POOL_BUCKETS 57
 
-/*! Thread pool for topics that don't want a dedicated taskprocessor */
-static struct ast_threadpool *threadpool;
+/*! Taskpool for topics that don't want a dedicated taskprocessor */
+static struct ast_taskpool *taskpool;
 
 STASIS_MESSAGE_TYPE_DEFN(stasis_subscription_change_type);
 
@@ -666,8 +732,8 @@ struct stasis_subscription_statistics {
 	int messages_passed;
 	/*! \brief Using a mailbox to queue messages */
 	int uses_mailbox;
-	/*! \brief Using stasis threadpool for handling messages */
-	int uses_threadpool;
+	/*! \brief Using stasis taskpool for handling messages */
+	int uses_taskpool;
 	/*! \brief The line number where the subscription originates */
 	int lineno;
 	/*! \brief Pointer to the subscription (NOT refcounted, and must NOT be accessed) */
@@ -820,7 +886,7 @@ static void subscription_statistics_destroy(void *obj)
 }
 
 static struct stasis_subscription_statistics *stasis_subscription_statistics_create(struct stasis_subscription *sub,
-	int needs_mailbox, int use_thread_pool, const char *file, int lineno,
+	int needs_mailbox, int use_taskpool, const char *file, int lineno,
 	const char *func)
 {
 	struct stasis_subscription_statistics *statistics;
@@ -845,7 +911,7 @@ static struct stasis_subscription_statistics *stasis_subscription_statistics_cre
 	statistics->lineno = lineno;
 	statistics->func = func;
 	statistics->uses_mailbox = needs_mailbox;
-	statistics->uses_threadpool = use_thread_pool;
+	statistics->uses_taskpool = use_taskpool;
 	strcpy(statistics->uniqueid, sub->uniqueid); /* SAFE */
 	statistics->sub = sub;
 	ao2_link(subscription_stats, statistics);
@@ -859,7 +925,7 @@ struct stasis_subscription *internal_stasis_subscribe(
 	stasis_subscription_cb callback,
 	void *data,
 	int needs_mailbox,
-	int use_thread_pool,
+	int use_taskpool,
 	const char *file,
 	int lineno,
 	const char *func)
@@ -879,7 +945,7 @@ struct stasis_subscription *internal_stasis_subscribe(
 
 #ifdef AST_DEVMODE
 	ret = ast_asprintf(&sub->uniqueid, "%s:%s-%d", file, stasis_topic_name(topic), ast_atomic_fetchadd_int(&topic->subscriber_id, +1));
-	sub->statistics = stasis_subscription_statistics_create(sub, needs_mailbox, use_thread_pool, file, lineno, func);
+	sub->statistics = stasis_subscription_statistics_create(sub, needs_mailbox, use_taskpool, file, lineno, func);
 	if (ret < 0 || !sub->statistics) {
 		ao2_ref(sub, -1);
 		return NULL;
@@ -897,7 +963,7 @@ struct stasis_subscription *internal_stasis_subscribe(
 
 		/* Create name with seq number appended. */
 		ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "stasis/%c:%s",
-			use_thread_pool ? 'p' : 'm',
+			use_taskpool ? 'p' : 'm',
 			stasis_topic_name(topic));
 
 		/*
@@ -905,8 +971,8 @@ struct stasis_subscription *internal_stasis_subscribe(
 		 * acceptable. For a large number of subscribers, a thread
 		 * pool should be used.
 		 */
-		if (use_thread_pool) {
-			sub->mailbox = ast_threadpool_serializer(tps_name, threadpool);
+		if (use_taskpool) {
+			sub->mailbox = ast_taskpool_serializer(tps_name, taskpool);
 		} else {
 			sub->mailbox = ast_taskprocessor_get(tps_name, TPS_REF_DEFAULT);
 		}
@@ -1710,6 +1776,22 @@ static void send_subscription_unsubscribe(struct stasis_topic *topic,
 struct topic_pool_entry {
 	struct stasis_forward *forward;
 	struct stasis_topic *topic;
+	/*
+	 * Per-entry initialization state. This lets us serialize creation of a
+	 * given topic name without holding the pool container lock while doing
+	 * the heavy lifting (topic creation, forwarding setup, etc).
+	 *
+	 * A topic_pool_entry starts life in an "in-flight" state where neither
+	 * initialized nor failed are set.  The first thread to link the entry
+	 * into the pool becomes the creator and is responsible for completing
+	 * initialization, setting one of the flags, and broadcasting init_cond.
+	 * Other threads that find the same entry simply wait for initialization
+	 * to complete and then reuse the created topic.
+	 */
+	ast_mutex_t init_lock;
+	ast_cond_t init_cond;
+	unsigned int initialized; /* terminal success state */
+	unsigned int failed; /* terminal failure state */
 	char name[0];
 };
 
@@ -1720,6 +1802,8 @@ static void topic_pool_entry_dtor(void *obj)
 	entry->forward = stasis_forward_cancel(entry->forward);
 	ao2_cleanup(entry->topic);
 	entry->topic = NULL;
+	ast_cond_destroy(&entry->init_cond);
+	ast_mutex_destroy(&entry->init_lock);
 }
 
 static struct topic_pool_entry *topic_pool_entry_alloc(const char *topic_name)
@@ -1731,9 +1815,9 @@ static struct topic_pool_entry *topic_pool_entry_alloc(const char *topic_name)
 	if (!topic_pool_entry) {
 		return NULL;
 	}
-
+	ast_mutex_init(&topic_pool_entry->init_lock);
+	ast_cond_init(&topic_pool_entry->init_cond, NULL);
 	strcpy(topic_pool_entry->name, topic_name); /* Safe */
-
 	return topic_pool_entry;
 }
 
@@ -1881,48 +1965,164 @@ void stasis_topic_pool_delete_topic(struct stasis_topic_pool *pool, const char *
 
 	ao2_find(pool->pool_container, search_topic_name, OBJ_SEARCH_KEY | OBJ_NODATA | OBJ_UNLINK);
 }
+/*!
+ * \brief Get a topic from the pool for the given name.
+ *
+ * This returns a **borrowed** reference: the pool container owns the topic
+ * and callers MUST NOT ao2_cleanup() the returned pointer.
+ *
+ * To avoid both deadlocks and wasted work we use a per-name "in-flight"
+ * topic_pool_entry while a topic is being created:
+ *
+ *  - The pool container lock is held only while looking up or inserting
+ *    the topic_pool_entry for a name.
+ *  - Exactly one thread becomes the creator for a given name and is
+ *    responsible for allocating the topic and wiring up forwarding.
+ *  - Other threads that race for the same name find the in-flight entry
+ *    and wait on its condition variable until initialization completes.
+ */
 
 struct stasis_topic *stasis_topic_pool_get_topic(struct stasis_topic_pool *pool, const char *topic_name)
 {
-	RAII_VAR(struct topic_pool_entry *, topic_pool_entry, NULL, ao2_cleanup);
-	SCOPED_AO2LOCK(topic_container_lock, pool->pool_container);
-	char *new_topic_name;
+	/*
+	* Lock ordering:
+	*
+	*   pool->pool_container (AO2 lock)
+	*       → entry->init_lock
+	*           → topic locks (inside stasis_topic_create() /
+	*                            stasis_forward_all())
+	*
+	* We intentionally do NOT hold the pool container lock while calling
+	* stasis_topic_create() or stasis_forward_all() to avoid deadlocks with
+	* other code that may take topic locks first and then need the pool lock.
+	*/
+	RAII_VAR(struct topic_pool_entry *, entry, NULL, ao2_cleanup);
+	char *fq = NULL;
+	int creator = 0;
 	int ret;
 
-	topic_pool_entry = ao2_find(pool->pool_container, topic_name, OBJ_SEARCH_KEY | OBJ_NOLOCK);
-	if (topic_pool_entry) {
-		return topic_pool_entry->topic;
-	}
-
-	topic_pool_entry = topic_pool_entry_alloc(topic_name);
-	if (!topic_pool_entry) {
+	if (!pool || ast_strlen_zero(topic_name)) {
 		return NULL;
 	}
 
-	/* To provide further detail and to ensure that the topic is unique within the scope of the
-	 * system we prefix it with the pooling topic name, which should itself already be unique.
+	/* Creator / waiter split:
+	 *
+	 * - The first thread to create/link an entry for topic_name becomes the
+	 *   "creator" and is responsible for creating the underlying stasis
+	 *   topic and wiring up forwarding.
+	 *
+	 * - Other threads that find the entry become "waiters"; they block on
+	 *   entry->init_cond until either initialization succeeds or fails.
 	 */
-	ret = ast_asprintf(&new_topic_name, "%s/%s", stasis_topic_name(pool->pool_topic), topic_name);
+
+	/* --- Creator selection under pool container lock --- */
+	ao2_lock(pool->pool_container);
+
+	entry = ao2_find(pool->pool_container, topic_name, OBJ_SEARCH_KEY | OBJ_NOLOCK);
+	if (!entry) {
+		entry = topic_pool_entry_alloc(topic_name);
+		if (!entry) {
+			ao2_unlock(pool->pool_container);
+			return NULL;
+		}
+
+		if (!ao2_link_flags(pool->pool_container, entry, OBJ_NOLOCK)) {
+			struct topic_pool_entry *other;
+
+			other = ao2_find(pool->pool_container, topic_name, OBJ_SEARCH_KEY | OBJ_NOLOCK);
+			if (other) {
+				struct topic_pool_entry *tmp = entry;
+
+				entry = other;
+				creator = 0;
+				ao2_unlock(pool->pool_container);
+				ao2_ref(tmp, -1);
+				goto waiter_path;
+			}
+			
+			ao2_unlock(pool->pool_container);
+			return NULL;
+		}
+
+		creator = 1;
+	}
+
+	ao2_unlock(pool->pool_container);
+
+/* --- Waiter path: wait for creator to finish --- */
+waiter_path:
+	if (!creator) {
+		ast_mutex_lock(&entry->init_lock);
+		while (!entry->initialized && !entry->failed) {
+			ast_cond_wait(&entry->init_cond, &entry->init_lock);
+		}
+
+		if (entry->initialized && !entry->failed) {
+			struct stasis_topic *topic = entry->topic;
+			
+			if (!topic) {
+				ast_debug(1, "Pooled topic '%s' marked initialized but topic is NULL\n", entry->name);
+				ast_mutex_unlock(&entry->init_lock);
+				return NULL;
+			}
+			ast_mutex_unlock(&entry->init_lock);
+			/* Borrowed reference: container owns the topic */
+			return topic;
+		}
+
+		ast_mutex_unlock(&entry->init_lock);
+		return NULL;
+	}
+
+	/* --- Creator path: perform topic creation without pool lock --- */
+	ast_mutex_lock(&entry->init_lock);
+	/* Defensive: entry may have been initialized/failed before we acquired init_lock. */
+	if (entry->initialized || entry->failed) {
+		struct stasis_topic *topic = entry->initialized ? entry->topic : NULL;
+		ast_mutex_unlock(&entry->init_lock);
+		return topic;
+	}
+
+	ret = ast_asprintf(&fq, "%s/%s", stasis_topic_name(pool->pool_topic), topic_name);
 	if (ret < 0) {
-		return NULL;
+		entry->failed = 1;
+		goto creator_fail;
 	}
 
-	topic_pool_entry->topic = stasis_topic_create(new_topic_name);
-	ast_free(new_topic_name);
-	if (!topic_pool_entry->topic) {
-		return NULL;
+	entry->topic = stasis_topic_create(fq);
+	ast_free(fq);
+	fq = NULL;
+
+	if (!entry->topic) {
+		entry->failed = 1;
+		goto creator_fail;
 	}
 
-	topic_pool_entry->forward = stasis_forward_all(topic_pool_entry->topic, pool->pool_topic);
-	if (!topic_pool_entry->forward) {
-		return NULL;
+	entry->forward = stasis_forward_all(entry->topic, pool->pool_topic);
+	if (!entry->forward) {
+		ao2_cleanup(entry->topic);
+		entry->topic = NULL;
+		entry->failed = 1;
+		goto creator_fail;
 	}
 
-	if (!ao2_link_flags(pool->pool_container, topic_pool_entry, OBJ_NOLOCK)) {
-		return NULL;
-	}
+	entry->initialized = 1;
+	ast_cond_broadcast(&entry->init_cond);
+	ast_mutex_unlock(&entry->init_lock);
 
-	return topic_pool_entry->topic;
+	return entry->topic; /* borrowed ref */
+
+creator_fail:
+	ast_debug(1, "Failed to create pooled stasis topic '%s/%s'\n", stasis_topic_name(pool->pool_topic), entry->name);
+	ast_cond_broadcast(&entry->init_cond);
+	ast_mutex_unlock(&entry->init_lock);
+
+	/* Remove failed entry so future callers can retry */
+	ao2_lock(pool->pool_container);
+	ao2_unlink(pool->pool_container, entry);
+	ao2_unlock(pool->pool_container);
+
+	return NULL;
 }
 
 int stasis_topic_pool_topic_exists(const struct stasis_topic_pool *pool, const char *topic_name)
@@ -2183,19 +2383,21 @@ struct stasis_declined_config {
 	struct ao2_container *declined;
 };
 
-/*! \brief Threadpool configuration options */
-struct stasis_threadpool_conf {
-	/*! Initial size of the thread pool */
+/*! \brief Taskpool configuration options */
+struct stasis_taskpool_conf {
+	/*! Minimum size of the taskpool */
+	int minimum_size;
+	/*! Initial size of the taskpool */
 	int initial_size;
-	/*! Time, in seconds, before we expire a thread */
+	/*! Time, in seconds, before we expire a taskprocessor */
 	int idle_timeout_sec;
-	/*! Maximum number of thread to allow */
+	/*! Maximum number of taskprocessors to allow */
 	int max_size;
 };
 
 struct stasis_config {
-	/*! Thread pool configuration options */
-	struct stasis_threadpool_conf *threadpool_options;
+	/*! Taskpool configuration options */
+	struct stasis_taskpool_conf *taskpool_options;
 	/*! Declined message types */
 	struct stasis_declined_config *declined_message_types;
 };
@@ -2203,12 +2405,20 @@ struct stasis_config {
 static struct aco_type threadpool_option = {
 	.type = ACO_GLOBAL,
 	.name = "threadpool",
-	.item_offset = offsetof(struct stasis_config, threadpool_options),
+	.item_offset = offsetof(struct stasis_config, taskpool_options),
 	.category = "threadpool",
 	.category_match = ACO_WHITELIST_EXACT,
 };
 
-static struct aco_type *threadpool_options[] = ACO_TYPES(&threadpool_option);
+static struct aco_type taskpool_option = {
+	.type = ACO_GLOBAL,
+	.name = "taskpool",
+	.item_offset = offsetof(struct stasis_config, taskpool_options),
+	.category = "taskpool",
+	.category_match = ACO_WHITELIST_EXACT,
+};
+
+static struct aco_type *taskpool_options[] = ACO_TYPES(&threadpool_option, &taskpool_option);
 
 /*! \brief An aco_type structure to link the "declined_message_types" category to the stasis_declined_config type */
 static struct aco_type declined_option = {
@@ -2223,7 +2433,7 @@ struct aco_type *declined_options[] = ACO_TYPES(&declined_option);
 
 struct aco_file stasis_conf = {
         .filename = "stasis.conf",
-	.types = ACO_TYPES(&declined_option, &threadpool_option),
+	.types = ACO_TYPES(&declined_option, &threadpool_option, &taskpool_option),
 };
 
 /*! \brief A global object container that will contain the stasis_config that gets swapped out on reloads */
@@ -2248,7 +2458,7 @@ static void stasis_config_destructor(void *obj)
 	struct stasis_config *cfg = obj;
 
 	ao2_cleanup(cfg->declined_message_types);
-	ast_free(cfg->threadpool_options);
+	ast_free(cfg->taskpool_options);
 }
 
 static void *stasis_config_alloc(void)
@@ -2259,8 +2469,8 @@ static void *stasis_config_alloc(void)
 		return NULL;
 	}
 
-	cfg->threadpool_options = ast_calloc(1, sizeof(*cfg->threadpool_options));
-	if (!cfg->threadpool_options) {
+	cfg->taskpool_options = ast_calloc(1, sizeof(*cfg->taskpool_options));
+	if (!cfg->taskpool_options) {
 		ao2_ref(cfg, -1);
 		return NULL;
 	}
@@ -2358,10 +2568,10 @@ static char *stasis_show_topics(struct ast_cli_entry *e, int cmd, struct ast_cli
 
 	ast_cli(a->fd, "\n" FMT_HEADERS, "Name", "Detail");
 
-	tmp_container = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, 0,
+	tmp_container = ao2_container_alloc_rbtree(AO2_ALLOC_OPT_LOCK_NOLOCK, 0,
 				topic_proxy_sort_fn, NULL);
 
-	if (!tmp_container || ao2_container_dup(tmp_container, topic_all, OBJ_SEARCH_OBJECT)) {
+	if (!tmp_container || ao2_container_dup(tmp_container, topic_all, 0)) {
 		ao2_cleanup(tmp_container);
 
 		return NULL;
@@ -2630,7 +2840,7 @@ static char *statistics_show_subscription(struct ast_cli_entry *e, int cmd, stru
 
 	subscription_stats = ao2_global_obj_ref(subscription_statistics);
 	if (!subscription_stats) {
-		ast_cli(a->fd, "Could not fetch subcription_statistics container\n");
+		ast_cli(a->fd, "Could not fetch subscription_statistics container\n");
 		return CLI_FAILURE;
 	}
 
@@ -2651,7 +2861,7 @@ static char *statistics_show_subscription(struct ast_cli_entry *e, int cmd, stru
 	ast_cli(a->fd, "Number of messages dropped due to filtering: %d\n", statistics->messages_dropped);
 	ast_cli(a->fd, "Number of messages passed to subscriber callback: %d\n", statistics->messages_passed);
 	ast_cli(a->fd, "Using mailbox to queue messages: %s\n", statistics->uses_mailbox ? "Yes" : "No");
-	ast_cli(a->fd, "Using stasis threadpool for handling messages: %s\n", statistics->uses_threadpool ? "Yes" : "No");
+	ast_cli(a->fd, "Using stasis taskpool for handling messages: %s\n", statistics->uses_taskpool ? "Yes" : "No");
 	ast_cli(a->fd, "Lowest amount of time (in milliseconds) spent invoking message: %ld\n", statistics->lowest_time_invoked);
 	ast_cli(a->fd, "Highest amount of time (in milliseconds) spent invoking message: %ld\n", statistics->highest_time_invoked);
 
@@ -3051,8 +3261,8 @@ static void stasis_cleanup(void)
 	ast_cli_unregister_multiple(cli_stasis, ARRAY_LEN(cli_stasis));
 	ao2_cleanup(topic_all);
 	topic_all = NULL;
-	ast_threadpool_shutdown(threadpool);
-	threadpool = NULL;
+	ast_taskpool_shutdown(taskpool);
+	taskpool = NULL;
 	STASIS_MESSAGE_TYPE_CLEANUP(stasis_subscription_change_type);
 	STASIS_MESSAGE_TYPE_CLEANUP(ast_multi_user_event_type);
 	aco_info_destroy(&cfg_info);
@@ -3063,7 +3273,7 @@ int stasis_init(void)
 {
 	struct stasis_config *cfg;
 	int cache_init;
-	struct ast_threadpool_options threadpool_opts = { 0, };
+	struct ast_taskpool_options taskpool_opts = { 0, };
 #ifdef AST_DEVMODE
 	struct ao2_container *subscription_stats;
 	struct ao2_container *topic_stats;
@@ -3078,17 +3288,21 @@ int stasis_init(void)
 
 	aco_option_register_custom(&cfg_info, "decline", ACO_EXACT,
 		declined_options, "", declined_handler, 0);
+	aco_option_register(&cfg_info, "minimum_size", ACO_EXACT,
+		taskpool_options, "5", OPT_INT_T, PARSE_IN_RANGE,
+		FLDSET(struct stasis_taskpool_conf, minimum_size), 0,
+		INT_MAX);
 	aco_option_register(&cfg_info, "initial_size", ACO_EXACT,
-		threadpool_options, "5", OPT_INT_T, PARSE_IN_RANGE,
-		FLDSET(struct stasis_threadpool_conf, initial_size), 0,
+		taskpool_options, "5", OPT_INT_T, PARSE_IN_RANGE,
+		FLDSET(struct stasis_taskpool_conf, initial_size), 0,
 		INT_MAX);
 	aco_option_register(&cfg_info, "idle_timeout_sec", ACO_EXACT,
-		threadpool_options, "20", OPT_INT_T, PARSE_IN_RANGE,
-		FLDSET(struct stasis_threadpool_conf, idle_timeout_sec), 0,
+		taskpool_options, "20", OPT_INT_T, PARSE_IN_RANGE,
+		FLDSET(struct stasis_taskpool_conf, idle_timeout_sec), 0,
 		INT_MAX);
 	aco_option_register(&cfg_info, "max_size", ACO_EXACT,
-		threadpool_options, "50", OPT_INT_T, PARSE_IN_RANGE,
-		FLDSET(struct stasis_threadpool_conf, max_size), 0,
+		taskpool_options, "50", OPT_INT_T, PARSE_IN_RANGE,
+		FLDSET(struct stasis_taskpool_conf, max_size), 0,
 		INT_MAX);
 
 	if (aco_process_config(&cfg_info, 0) == ACO_PROCESS_ERROR) {
@@ -3098,7 +3312,7 @@ int stasis_init(void)
 			return -1;
 		}
 
-		if (aco_set_defaults(&threadpool_option, "threadpool", default_cfg->threadpool_options)) {
+		if (aco_set_defaults(&taskpool_option, "taskpool", default_cfg->taskpool_options)) {
 			ast_log(LOG_ERROR, "Failed to initialize defaults on Stasis configuration object\n");
 			ao2_ref(default_cfg, -1);
 
@@ -3124,15 +3338,16 @@ int stasis_init(void)
 		}
 	}
 
-	threadpool_opts.version = AST_THREADPOOL_OPTIONS_VERSION;
-	threadpool_opts.initial_size = cfg->threadpool_options->initial_size;
-	threadpool_opts.auto_increment = 1;
-	threadpool_opts.max_size = cfg->threadpool_options->max_size;
-	threadpool_opts.idle_timeout = cfg->threadpool_options->idle_timeout_sec;
-	threadpool = ast_threadpool_create("stasis", NULL, &threadpool_opts);
+	taskpool_opts.version = AST_TASKPOOL_OPTIONS_VERSION;
+	taskpool_opts.minimum_size = cfg->taskpool_options->minimum_size;
+	taskpool_opts.initial_size = cfg->taskpool_options->initial_size;
+	taskpool_opts.auto_increment = 1;
+	taskpool_opts.max_size = cfg->taskpool_options->max_size;
+	taskpool_opts.idle_timeout = cfg->taskpool_options->idle_timeout_sec;
+	taskpool = ast_taskpool_create("stasis", &taskpool_opts);
 	ao2_ref(cfg, -1);
-	if (!threadpool) {
-		ast_log(LOG_ERROR, "Failed to create 'stasis-core' threadpool\n");
+	if (!taskpool) {
+		ast_log(LOG_ERROR, "Failed to create 'stasis-core' taskpool\n");
 
 		return -1;
 	}

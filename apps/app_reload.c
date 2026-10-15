@@ -42,7 +42,6 @@
 		<since>
 			<version>16.20.0</version>
 			<version>18.6.0</version>
-			<version>19.0.0</version>
 		</since>
 		<synopsis>
 			Reloads an Asterisk module, blocking the channel until the reload has completed.
@@ -86,7 +85,7 @@ static int reload_exec(struct ast_channel *chan, const char *data)
 	targets = ast_strdupa(data);
 	ast_autoservice_start(chan);
 	if (ast_strlen_zero(targets)) { /* Reload everything */
-		res = ast_module_reload(targets);
+		res = ast_module_reload(NULL);
 	} else {
 		while((target = ast_strsep(&targets, ',', AST_STRSEP_ALL))) {
 			res |= ast_module_reload(target);

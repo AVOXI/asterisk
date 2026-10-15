@@ -63,20 +63,35 @@
 	<configInfo name="cel" language="en_US">
 		<configFile name="cel.conf">
 			<configObject name="general">
+				<since>
+					<version>12.0.0</version>
+				</since>
 				<synopsis>Options that apply globally to Channel Event Logging (CEL)</synopsis>
 				<configOption name="enable">
+					<since>
+						<version>12.0.0</version>
+					</since>
 					<synopsis>Determines whether CEL is enabled</synopsis>
 				</configOption>
 				<configOption name="dateformat">
+					<since>
+						<version>12.0.0</version>
+					</since>
 					<synopsis>The format to be used for dates when logging</synopsis>
 				</configOption>
 				<configOption name="apps">
+					<since>
+						<version>12.0.0</version>
+					</since>
 					<synopsis>List of apps for CEL to track</synopsis>
 					<description><para>A case-insensitive, comma-separated list of applications
 					to track when one or both of APP_START and APP_END events are flagged for
 					tracking</para></description>
 				</configOption>
 				<configOption name="events">
+					<since>
+						<version>12.0.0</version>
+					</since>
 					<synopsis>List of events for CEL to track</synopsis>
 					<description><para>A case-sensitive, comma-separated list of event names
 					to track. These event names do not include the leading <literal>AST_CEL</literal>.
@@ -103,6 +118,9 @@
 						<enum name="LINKEDID_END"/>
 						<enum name="LOCAL_OPTIMIZE"/>
 						<enum name="LOCAL_OPTIMIZE_BEGIN"/>
+						<enum name="STREAM_BEGIN"/>
+						<enum name="STREAM_END"/>
+						<enum name="DTMF"/>
 					</enumlist>
 					</description>
 				</configOption>
@@ -323,6 +341,9 @@ static const char * const cel_event_types[CEL_MAX_EVENT_IDS] = {
 	[AST_CEL_LINKEDID_END]     = "LINKEDID_END",
 	[AST_CEL_LOCAL_OPTIMIZE]   = "LOCAL_OPTIMIZE",
 	[AST_CEL_LOCAL_OPTIMIZE_BEGIN]   = "LOCAL_OPTIMIZE_BEGIN",
+	[AST_CEL_STREAM_BEGIN]     = "STREAM_BEGIN",
+	[AST_CEL_STREAM_END]       = "STREAM_END",
+	[AST_CEL_DTMF]             = "DTMF",
 };
 
 struct cel_backend {
@@ -652,6 +673,39 @@ static void check_retire_linkedid(struct ast_channel_snapshot *snapshot, const s
 	ao2_ref(lid, -1);
 }
 
+static int cel_format_eventtime(struct cel_config *cfg, struct timeval eventtime, char *timebuf, size_t len)
+{
+	if (!timebuf || len < 30) {
+		return -1;
+	}
+
+	if (ast_strlen_zero(cfg->general->date_format)) {
+		snprintf(timebuf, len, "%ld.%06ld", (long) eventtime.tv_sec,
+				(long) eventtime.tv_usec);
+	} else {
+		struct ast_tm tm;
+		ast_localtime(&eventtime, &tm, NULL);
+		ast_strftime(timebuf, len, cfg->general->date_format, &tm);
+	}
+
+	return 0;
+}
+
+int ast_cel_format_eventtime(struct timeval eventtime, char *timebuf, size_t len)
+{
+	struct cel_config *cfg = ao2_global_obj_ref(cel_configs);
+	int res = 0;
+
+	if (!cfg) {
+		return -1;
+	}
+
+	res = cel_format_eventtime(cfg, eventtime, timebuf, len);
+	ao2_cleanup(cfg);
+
+	return res;
+}
+
 /* Note that no 'chan_fixup' function is provided for this datastore type,
  * because the channels that will use it will never be involved in masquerades.
  */
@@ -698,14 +752,7 @@ struct ast_channel *ast_cel_fabricate_channel_from_event(const struct ast_event 
 		AST_LIST_INSERT_HEAD(headp, newvariable, entries);
 	}
 
-	if (ast_strlen_zero(cfg->general->date_format)) {
-		snprintf(timebuf, sizeof(timebuf), "%ld.%06ld", (long) record.event_time.tv_sec,
-				(long) record.event_time.tv_usec);
-	} else {
-		struct ast_tm tm;
-		ast_localtime(&record.event_time, &tm, NULL);
-		ast_strftime(timebuf, sizeof(timebuf), cfg->general->date_format, &tm);
-	}
+	cel_format_eventtime(cfg, record.event_time, timebuf, sizeof(timebuf));
 
 	if ((newvariable = ast_var_assign("eventtime", timebuf))) {
 		AST_LIST_INSERT_HEAD(headp, newvariable, entries);
@@ -738,6 +785,7 @@ struct ast_channel *ast_cel_fabricate_channel_from_event(const struct ast_event 
 	ast_channel_accountcode_set(tchan, record.account_code);
 	ast_channel_peeraccount_set(tchan, record.peer_account);
 	ast_channel_userfield_set(tchan, record.user_field);
+	ast_channel_tenantid_set(tchan, record.tenant_id);
 
 	if ((newvariable = ast_var_assign("BRIDGEPEER", record.peer))) {
 		AST_LIST_INSERT_HEAD(headp, newvariable, entries);
@@ -834,12 +882,8 @@ int ast_cel_fill_record(const struct ast_event *e, struct ast_cel_event_record *
 	r->event_time.tv_usec = ast_event_get_ie_uint(e, AST_EVENT_IE_CEL_EVENT_TIME_USEC);
 
 	r->event_name = ast_cel_get_type_name(r->event_type);
-	if (r->event_type == AST_CEL_USER_DEFINED) {
-		r->user_defined_name = ast_event_get_ie_str(e, AST_EVENT_IE_CEL_USEREVENT_NAME);
-	} else {
-		r->user_defined_name = "";
-	}
 
+	r->user_defined_name= S_OR(ast_event_get_ie_str(e, AST_EVENT_IE_CEL_USEREVENT_NAME), "");
 	r->caller_id_name   = S_OR(ast_event_get_ie_str(e, AST_EVENT_IE_CEL_CIDNAME), "");
 	r->caller_id_num    = S_OR(ast_event_get_ie_str(e, AST_EVENT_IE_CEL_CIDNUM), "");
 	r->caller_id_ani    = S_OR(ast_event_get_ie_str(e, AST_EVENT_IE_CEL_CIDANI), "");
@@ -1267,11 +1311,20 @@ static void cel_generic_cb(
 
 	switch (event_type) {
 	case AST_CEL_USER_DEFINED:
+	case AST_CEL_DTMF:
+	case AST_CEL_STREAM_BEGIN:
 		{
 			const char *event = ast_json_string_get(ast_json_object_get(event_details, "event"));
 			struct ast_json *extra = ast_json_object_get(event_details, "extra");
 			cel_report_event(obj->snapshot, event_type, stasis_message_timestamp(message),
 				event, extra, NULL);
+			break;
+		}
+	case AST_CEL_STREAM_END:
+		{
+			const char *event = ast_json_string_get(ast_json_object_get(event_details, "event"));
+			cel_report_event(obj->snapshot, event_type, stasis_message_timestamp(message),
+				event, NULL, NULL);
 			break;
 		}
 	default:

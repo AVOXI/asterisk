@@ -101,10 +101,51 @@ append_logfiles=false
 declare -a LOGFILES
 declare -a ARGS_LOGFILES
 
+# Function to safely source a config file with security checks
+# This prevents privilege escalation by ensuring config files are
+# owned by root and not writable by group or others when running as root
+safe_source_config() {
+	local config_file="$1"
+
+	# Return if file doesn't exist
+	[ -f "$config_file" ] || return 0
+
+	# Get the absolute path
+	config_file=$(readlink -f "$config_file")
+
+	# Check if running as root (effective UID is 0)
+	if [ $EUID -eq 0 ]; then
+		# Running as root - apply strict security checks
+		# Get file owner UID and permissions
+		local file_stat
+		file_stat=$(stat -c "%u %a" "$config_file" 2>/dev/null) || return 0
+		local owner_uid=${file_stat%% *}
+		local perms=${file_stat##* }
+
+		# File must be owned by root (UID 0)
+		if [ "$owner_uid" -ne 0 ]; then
+			echo "WARNING: Config file $config_file is not owned by root. Skipping for security." >&2
+			return 1
+		fi
+
+		# File must not be writable by group or others (check group-write and other-write bits)
+		# Extract the group and other permission digits
+		local group_perms=$((perms / 10 % 10))
+		local other_perms=$((perms % 10))
+
+		if [ $((group_perms & 2)) -ne 0 ] || [ $((other_perms & 2)) -ne 0 ]; then
+			echo "WARNING: Config file $config_file is writable by group or others. Skipping for security." >&2
+			return 1
+		fi
+	fi
+
+	source "$config_file"
+}
+
 # Read config files from least important to most important
-[ -f /etc/asterisk/ast_debug_tools.conf ] && source /etc/asterisk/ast_debug_tools.conf
-[ -f ~/ast_debug_tools.conf ] && source ~/ast_debug_tools.conf
-[ -f ./ast_debug_tools.conf ] && source ./ast_debug_tools.conf
+safe_source_config /etc/asterisk/ast_debug_tools.conf
+safe_source_config ~/ast_debug_tools.conf
+safe_source_config ./ast_debug_tools.conf
 
 if [ ${#LOGFILES[@]} -eq 0 ] ; then
 	LOGFILES+=(/var/log/asterisk/messages* /var/log/asterisk/queue* \
@@ -175,17 +216,17 @@ fi
 # Timestamp to use for output files
 df=${tarball_uniqueid:-$(${DATEFORMAT})}
 
-# Extract the Python timestamp conver script from the end of this
-# script and save it to /tmp/.ast_tsconvert.py
-
-ss=`egrep -n "^#@@@SCRIPTSTART@@@" $0 |cut -f1 -d:`
-tail -n +${ss} $0 >/tmp/.ast_tsconvert.py
-
 tmpdir=$(mktemp -d)
 if [ -z "$tmpdir" ] ; then
 	echo "${prog}: Unable to create temporary directory."
 	exit 1
 fi
+
+# Extract the Python timestamp conver script from the end of this
+# script and save it to the temporary directory
+
+install -m 0600 /dev/stdin "$tmpdir/.ast_tsconvert.py" < <(sed '1,/^#@@@SCRIPTSTART@@@/ d' "$0")
+
 trap "rm -rf $tmpdir" EXIT
 tardir=asterisk-${df}.logfiles
 
@@ -197,7 +238,7 @@ for i in ${!LOGFILES[@]} ; do
 	mkdir -p "$destdir" 2>/dev/null || :
 	if [ -n "$LOG_DATEFORMAT" ] ; then
 		echo "Converting $lf"
-		cat "$lf" | python /tmp/.ast_tsconvert.py --format="$LOG_DATEFORMAT" --timezone="$LOG_TIMEZONE" > "${destfile}"
+		cat "$lf" | python "$tmpdir/.ast_tsconvert.py" --format="$LOG_DATEFORMAT" --timezone="$LOG_TIMEZONE" > "${destfile}"
 	else
 		echo "Copying $lf"
 		cp "$lf" "${destfile}"

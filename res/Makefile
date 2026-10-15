@@ -32,7 +32,7 @@ ael/ael_lex.o: ael/ael_lex.c ../include/asterisk/ael_structs.h ael/ael.tab.h
 ael/ael_lex.o: _ASTCFLAGS+=-I. -Iael -Wno-unused $(AST_NO_FORMAT_TRUNCATION)
 
 ael/ael.tab.o: ael/ael.tab.c ael/ael.tab.h ../include/asterisk/ael_structs.h
-ael/ael.tab.o: _ASTCFLAGS+=-I. -Iael -DYYENABLE_NLS=0
+ael/ael.tab.o: _ASTCFLAGS+=-I. -Iael -Wno-unused -DYYENABLE_NLS=0
 
 ifneq ($(findstring REBUILD_PARSERS,$(MENUSELECT_CFLAGS)),)
 ael/ael_lex.c: ael/ael.flex
@@ -54,6 +54,7 @@ endif
 	$(CMD_PREFIX) (cd ael; $(BISON) -v -d ael.y)
 
 ael/pval.o: ael/pval.c
+ael/pval.o: _ASTCFLAGS+=-Wno-unused
 
 $(call MOD_ADD_C,res_ael_share,ael/ael_lex.c ael/ael.tab.c ael/pval.c)
 $(call MOD_ADD_C,res_stasis,$(wildcard stasis/*.c))
@@ -62,12 +63,13 @@ $(call MOD_ADD_C,res_parking,$(wildcard parking/*.c))
 $(call MOD_ADD_C,res_pjsip,$(wildcard res_pjsip/*.c))
 $(call MOD_ADD_C,res_pjsip_session,$(wildcard res_pjsip_session/*.c))
 $(call MOD_ADD_C,res_prometheus,$(wildcard prometheus/*.c))
-$(call MOD_ADD_C,res_ari,ari/cli.c ari/config.c ari/ari_websockets.c)
+$(call MOD_ADD_C,res_ari,ari/cli.c ari/config.c ari/ari_websockets.c ari/ari_websocket_requests.c)
 $(call MOD_ADD_C,res_ari_model,ari/ari_model_validators.c)
 $(call MOD_ADD_C,res_stasis_recording,stasis_recording/stored.c)
 $(call MOD_ADD_C,res_stir_shaken,$(wildcard res_stir_shaken/*.c))
 $(call MOD_ADD_C,res_aeap,$(wildcard res_aeap/*.c))
 $(call MOD_ADD_C,res_geolocation,$(wildcard res_geolocation/*.c))
+$(call MOD_ADD_C,res_cdrel_custom,$(wildcard cdrel_custom/*.c))
 
 # These are the xml and xslt files to be embedded
 res_geolocation.so: res_geolocation/pidf_lo_test.o res_geolocation/pidf_to_eprofile.o res_geolocation/eprofile_to_pidf.o
@@ -75,6 +77,21 @@ res_geolocation.so: res_geolocation/pidf_lo_test.o res_geolocation/pidf_to_eprof
 res_parking.o: _ASTCFLAGS+=$(AST_NO_FORMAT_TRUNCATION)
 snmp/agent.o: _ASTCFLAGS+=-fPIC
 res_snmp.o: _ASTCFLAGS+=-fPIC
+
+MODULE_EXCLUDE=ENABLE_SRTP_AES_192 ENABLE_SRTP_AES_256 ENABLE_SRTP_AES_GCM
+
+ifeq ($(findstring ENABLE_SRTP_AES_192,$(MENUSELECT_RES)),)
+res_srtp.o: _ASTCFLAGS+=-DENABLE_SRTP_AES_192
+endif
+
+ifeq ($(findstring ENABLE_SRTP_AES_256,$(MENUSELECT_RES)),)
+res_srtp.o: _ASTCFLAGS+=-DENABLE_SRTP_AES_256
+endif
+
+ifeq ($(findstring ENABLE_SRTP_AES_GCM,$(MENUSELECT_RES)),)
+res_srtp.o: _ASTCFLAGS+=-DENABLE_SRTP_AES_GCM
+endif
+
 
 # Dependencies for res_ari_*.so are generated, so they're in this file
 include ari.make

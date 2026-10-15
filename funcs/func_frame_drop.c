@@ -41,7 +41,6 @@
 		<since>
 			<version>16.21.0</version>
 			<version>18.7.0</version>
-			<version>19.0.0</version>
 		</since>
 		<synopsis>
 			Drops specific frame types in the TX or RX direction on a channel.
@@ -174,6 +173,7 @@ static struct ast_frame *hook_event_cb(struct ast_channel *chan, struct ast_fram
 {
 	int i;
 	int drop_frame = 0;
+	char buf[64];
 	struct frame_drop_data *framedata = data;
 	if (!frame) {
 		return frame;
@@ -189,6 +189,7 @@ static struct ast_frame *hook_event_cb(struct ast_channel *chan, struct ast_fram
 			if (frame->subclass.integer == controlframetype2str[i].type) {
 				if (framedata->controlvalues[i]) {
 					drop_frame = 1;
+					ast_frame_subclass2str(frame, buf, sizeof(buf), NULL, 0);
 				}
 				break;
 			}
@@ -198,6 +199,7 @@ static struct ast_frame *hook_event_cb(struct ast_channel *chan, struct ast_fram
 			if (frame->frametype == frametype2str[i].type) {
 				if (framedata->values[i]) {
 					drop_frame = 1;
+					ast_frame_type2str(frame->frametype, buf, sizeof(buf));
 				}
 				break;
 			}
@@ -207,6 +209,7 @@ static struct ast_frame *hook_event_cb(struct ast_channel *chan, struct ast_fram
 	if (drop_frame) {
 		ast_frfree(frame);
 		frame = &ast_null_frame;
+		ast_debug(2, "Dropping %s frame\n", buf);
 	}
 	return frame;
 }
@@ -235,8 +238,10 @@ static int frame_drop_helper(struct ast_channel *chan, const char *cmd, char *da
 		framedata->list_type = TX;
 	}
 
-	buffer = ast_malloc(sizeof(value) + 3); /* leading and trailing comma and null terminator */
-	snprintf(buffer, sizeof(value) + 2, ",%s,", value);
+	if (ast_asprintf(&buffer, ",%s,", value) < 0) {
+		ast_free(framedata);
+		return -1;
+	}
 	for (i = 0; i < ARRAY_LEN(frametype2str); i++) {
 		if (strcasestr(buffer, frametype2str[i].str)) {
 			framedata->values[i] = 1;

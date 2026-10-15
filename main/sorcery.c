@@ -39,9 +39,10 @@
 #include "asterisk/netsock2.h"
 #include "asterisk/module.h"
 #include "asterisk/taskprocessor.h"
-#include "asterisk/threadpool.h"
+#include "asterisk/taskpool.h"
 #include "asterisk/json.h"
 #include "asterisk/vector.h"
+#include "asterisk/cli.h"
 
 /* To prevent DEBUG_FD_LEAKS from interfering with things we undef open and close */
 #undef open
@@ -82,8 +83,8 @@
 #define NOTIFY_WIZARD_OBSERVERS(container, callback, ...) \
 	NOTIFY_GENERIC_OBSERVERS(container, sorcery_wizard_observer, callback, __VA_ARGS__)
 
-/*! \brief Thread pool for observers */
-static struct ast_threadpool *threadpool;
+/*! \brief Taskpool for observers */
+static struct ast_taskpool *taskpool;
 
 /*! \brief Structure for an internal wizard instance */
 struct ast_sorcery_internal_wizard {
@@ -283,6 +284,9 @@ struct ao2_container *observers;
 /*! \brief Registered sorcery instances */
 static struct ao2_container *instances;
 
+/* \brief Global config flag (declared in sorcery.h) */
+int ast_sorcery_update_or_create_on_update_miss = 0;
+
 static int int_handler_fn(const void *obj, const intptr_t *args, char **buf)
 {
 	int *field = (int *)(obj + args[0]);
@@ -365,11 +369,41 @@ AO2_STRING_FIELD_CMP_FN(ast_sorcery_internal_wizard, callbacks.name)
 AO2_STRING_FIELD_HASH_FN(ast_sorcery_object_field, name)
 AO2_STRING_FIELD_CMP_FN(ast_sorcery_object_field, name)
 
+/*!
+ * \internal
+ * \brief CLI command implementation for 'sorcery show settings'
+ */
+static char *cli_show_settings(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	switch (cmd) {
+	case CLI_INIT:
+		e->command = "sorcery show settings";
+		e->usage = "Usage: sorcery show settings\n"
+			   "      Show global configuration options\n";
+		return NULL;
+	case CLI_GENERATE:
+		return NULL;
+	}
+
+	ast_cli(a->fd, "\nSorcery global settings\n");
+	ast_cli(a->fd, "-----------------\n");
+	ast_cli(a->fd, "  Update->Create fallback in backends: %s\n",
+		ast_sorcery_update_or_create_on_update_miss ? "enabled" : "disabled");
+
+	return CLI_SUCCESS;
+}
+
+
+static struct ast_cli_entry cli_commands[] = {
+        AST_CLI_DEFINE(cli_show_settings, "Show global configuration options"),
+};
+
 /*! \brief Cleanup function for graceful shutdowns */
 static void sorcery_cleanup(void)
 {
-	ast_threadpool_shutdown(threadpool);
-	threadpool = NULL;
+	ast_cli_unregister_multiple(cli_commands, ARRAY_LEN(cli_commands));
+	ast_taskpool_shutdown(taskpool);
+	taskpool = NULL;
 	ao2_cleanup(wizards);
 	wizards = NULL;
 	ao2_cleanup(observers);
@@ -384,19 +418,45 @@ AO2_STRING_FIELD_CMP_FN(sorcery_proxy, module_name)
 /*! \brief Hashing function for sorcery instances */
 AO2_STRING_FIELD_HASH_FN(sorcery_proxy, module_name)
 
+/*!
+ * \internal
+ * \brief Parse [general] options from sorcery.conf and set globals.
+ */
+static void parse_general_options(void)
+{
+	struct ast_flags flags = { 0 };
+	struct ast_config *cfg = ast_config_load2("sorcery.conf", "sorcery", flags);
+	const struct ast_variable *var;
+
+	if (!cfg || cfg == CONFIG_STATUS_FILEINVALID) {
+		return;
+	}
+
+	for (var = ast_variable_browse(cfg, "general"); var; var = var->next) {
+		if (!strcasecmp(var->name, "update_or_create_on_update_miss")) {
+			ast_sorcery_update_or_create_on_update_miss = ast_true(var->value);
+		}
+	}
+
+	ast_config_destroy(cfg);
+}
+
 int ast_sorcery_init(void)
 {
-	struct ast_threadpool_options options = {
-		.version = AST_THREADPOOL_OPTIONS_VERSION,
+	struct ast_taskpool_options options = {
+		.version = AST_TASKPOOL_OPTIONS_VERSION,
 		.auto_increment = 1,
 		.max_size = 0,
 		.idle_timeout = 60,
-		.initial_size = 0,
+		.initial_size = 1,
+		.minimum_size = 1,
 	};
 	ast_assert(wizards == NULL);
 
-	threadpool = ast_threadpool_create("sorcery", NULL, &options);
-	if (!threadpool) {
+	parse_general_options();
+
+	taskpool = ast_taskpool_create("sorcery", &options);
+	if (!taskpool) {
 		return -1;
 	}
 
@@ -414,6 +474,10 @@ int ast_sorcery_init(void)
 	instances = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_RWLOCK, 0, INSTANCE_BUCKETS,
 		sorcery_proxy_hash_fn, NULL, sorcery_proxy_cmp_fn);
 	if (!instances) {
+		return -1;
+	}
+
+	if (ast_cli_register_multiple(cli_commands, ARRAY_LEN(cli_commands))) {
 		return -1;
 	}
 
@@ -744,7 +808,7 @@ static struct ast_sorcery_object_type *sorcery_object_type_alloc(const char *typ
 	/* Create name with seq number appended. */
 	ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "sorcery/%s", type);
 
-	if (!(object_type->serializer = ast_threadpool_serializer(tps_name, threadpool))) {
+	if (!(object_type->serializer = ast_taskpool_serializer(tps_name, taskpool))) {
 		ao2_ref(object_type, -1);
 		return NULL;
 	}
@@ -1907,7 +1971,7 @@ void *ast_sorcery_retrieve_by_fields(const struct ast_sorcery *sorcery, const ch
 
 	/* If returning multiple objects create a container to store them in */
 	if ((flags & AST_RETRIEVE_FLAG_MULTIPLE)) {
-		object = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, 0, NULL, NULL);
+		object = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, AO2_CONTAINER_ALLOC_OPT_DUPS_REJECT, ast_sorcery_object_id_sort, ast_sorcery_object_id_compare);
 		if (!object) {
 			return NULL;
 		}
@@ -1961,7 +2025,7 @@ struct ao2_container *ast_sorcery_retrieve_by_regex(const struct ast_sorcery *so
 		return NULL;
 	}
 
-	objects = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, 0, NULL, NULL);
+	objects = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, AO2_CONTAINER_ALLOC_OPT_DUPS_REJECT, ast_sorcery_object_id_sort, ast_sorcery_object_id_compare);
 	if (!objects) {
 		return NULL;
 	}
@@ -1996,7 +2060,7 @@ struct ao2_container *ast_sorcery_retrieve_by_prefix(const struct ast_sorcery *s
 		return NULL;
 	}
 
-	objects = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, 0, NULL, NULL);
+	objects = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_NOLOCK, AO2_CONTAINER_ALLOC_OPT_DUPS_REJECT, ast_sorcery_object_id_sort, ast_sorcery_object_id_compare);
 	if (!objects) {
 		return NULL;
 	}

@@ -44,6 +44,9 @@
 
 /*** DOCUMENTATION
 	<function name="PRESENCE_STATE" language="en_US">
+		<since>
+			<version>11.0.0</version>
+		</since>
 		<synopsis>
 			Get or Set a presence state.
 		</synopsis>
@@ -424,10 +427,6 @@ static char *handle_cli_presencestate_change(struct ast_cli_entry *e, int cmd, s
 
 	args = ast_strdupa(state);
 	if (parse_data(args, &state_val, &subtype, &message, &options)) {
-		return CLI_SHOWUSAGE;
-	}
-
-	if (state_val == AST_PRESENCE_NOT_SET) {
 		return CLI_SHOWUSAGE;
 	}
 

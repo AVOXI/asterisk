@@ -51,6 +51,7 @@
 #include <fcntl.h>
 
 #include "asterisk/paths.h"	/* use ast_config_AST_DATA_DIR */
+#include "asterisk/acl.h"
 #include "asterisk/cli.h"
 #include "asterisk/tcptls.h"
 #include "asterisk/http.h"
@@ -177,6 +178,19 @@ struct http_uri_redirect {
 
 static AST_RWLIST_HEAD_STATIC(uri_redirects, http_uri_redirect);
 
+/*! \brief Per-path ACL restriction */
+struct http_restriction {
+	AST_LIST_ENTRY(http_restriction) entry;
+	struct ast_acl_list *acl;
+	char path[];
+};
+
+AST_LIST_HEAD_NOLOCK(http_restriction_list, http_restriction);
+
+static AST_RWLIST_HEAD_STATIC(restrictions, http_restriction);
+
+static int check_restriction_acl(struct ast_tcptls_session_instance *ser, const char *uri);
+
 static const struct ast_cfhttp_methods_text {
 	enum ast_http_method method;
 	const char *text;
@@ -201,6 +215,19 @@ const char *ast_get_http_method(enum ast_http_method method)
 	}
 
 	return NULL;
+}
+
+enum ast_http_method ast_get_http_method_from_string(const char *method)
+{
+	int x;
+
+	for (x = 0; x < ARRAY_LEN(ast_http_methods_text); x++) {
+		if (ast_strings_equal(method, ast_http_methods_text[x].text)) {
+			return ast_http_methods_text[x].method;
+		}
+	}
+
+	return AST_HTTP_UNKNOWN;
 }
 
 const char *ast_http_ftype2mtype(const char *ftype)
@@ -368,6 +395,34 @@ out403:
 	return 0;
 }
 
+static void str_append_escaped(struct ast_str **str, const char *in)
+{
+	const char *cur = in;
+
+	while(*cur) {
+		switch (*cur) {
+		case '<':
+			ast_str_append(str, 0, "&lt;");
+			break;
+		case '>':
+			ast_str_append(str, 0, "&gt;");
+			break;
+		case '&':
+			ast_str_append(str, 0, "&amp;");
+			break;
+		case '"':
+			ast_str_append(str, 0, "&quot;");
+			break;
+		default:
+			ast_str_append(str, 0, "%c", *cur);
+			break;
+		}
+		cur++;
+	}
+
+	return;
+}
+
 static int httpstatus_callback(struct ast_tcptls_session_instance *ser,
 	const struct ast_http_uri *urih, const char *uri,
 	enum ast_http_method method, struct ast_variable *get_vars,
@@ -406,13 +461,21 @@ static int httpstatus_callback(struct ast_tcptls_session_instance *ser,
 	}
 	ast_str_append(&out, 0, "<tr><td colspan=\"2\"><hr></td></tr>\r\n");
 	for (v = get_vars; v; v = v->next) {
-		ast_str_append(&out, 0, "<tr><td><i>Submitted GET Variable '%s'</i></td><td>%s</td></tr>\r\n", v->name, v->value);
+		ast_str_append(&out, 0, "<tr><td><i>Submitted GET Variable '");
+		str_append_escaped(&out, v->name);
+		ast_str_append(&out, 0, "'</i></td><td>");
+		str_append_escaped(&out, v->value);
+		ast_str_append(&out, 0, "</td></tr>\r\n");
 	}
 	ast_str_append(&out, 0, "<tr><td colspan=\"2\"><hr></td></tr>\r\n");
 
 	cookies = ast_http_get_cookies(headers);
 	for (v = cookies; v; v = v->next) {
-		ast_str_append(&out, 0, "<tr><td><i>Cookie '%s'</i></td><td>%s</td></tr>\r\n", v->name, v->value);
+		ast_str_append(&out, 0, "<tr><td><i>Cookie '");
+		str_append_escaped(&out, v->name);
+		ast_str_append(&out, 0, "'</i></td><td>");
+		str_append_escaped(&out, v->value);
+		ast_str_append(&out, 0, "</td></tr>\r\n");
 	}
 	ast_variables_destroy(cookies);
 
@@ -571,6 +634,7 @@ void ast_http_create_response(struct ast_tcptls_session_instance *ser, int statu
 	const char *status_title, struct ast_str *http_header_data, const char *text)
 {
 	char server_name[MAX_SERVER_NAME_LENGTH];
+	char escaped_text[512];
 	struct ast_str *server_address = ast_str_create(MAX_SERVER_NAME_LENGTH);
 	struct ast_str *out = ast_str_create(INITIAL_RESPONSE_BODY_BUFFER);
 
@@ -593,6 +657,13 @@ void ast_http_create_response(struct ast_tcptls_session_instance *ser, int statu
 	                server_name);
 	}
 
+	/* Escape text to prevent reflected XSS in error pages */
+	if (!ast_strlen_zero(text)) {
+		ast_xml_escape(text, escaped_text, sizeof(escaped_text));
+	} else {
+		escaped_text[0] = '\0';
+	}
+
 	ast_str_set(&out,
 	            0,
 	            "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\r\n"
@@ -607,7 +678,7 @@ void ast_http_create_response(struct ast_tcptls_session_instance *ser, int statu
 	            status_code,
 	            status_title,
 	            status_title,
-	            text ? text : "",
+	            escaped_text,
 	            ast_str_buffer(server_address));
 
 	ast_free(server_address);
@@ -1353,30 +1424,18 @@ struct ast_json *ast_http_get_json(
  * get post variables from client Request Entity-Body, if content type is
  * application/x-www-form-urlencoded
  */
-struct ast_variable *ast_http_get_post_vars(
-	struct ast_tcptls_session_instance *ser, struct ast_variable *headers)
+struct ast_variable *ast_http_parse_post_form(char *buf, int content_length,
+	const char *content_type)
 {
-	int content_length = 0;
 	struct ast_variable *v, *post_vars=NULL, *prev = NULL;
 	char *var, *val;
-	RAII_VAR(char *, buf, NULL, ast_free);
-	RAII_VAR(char *, type, get_content_type(headers), ast_free);
 
 	/* Use errno to distinguish errors from no params */
 	errno = 0;
 
-	if (ast_strlen_zero(type) ||
-	    strcasecmp(type, "application/x-www-form-urlencoded")) {
+	if (ast_strlen_zero(content_type) ||
+		strcasecmp(content_type, "application/x-www-form-urlencoded") != 0) {
 		/* Content type is not form data.  Don't read the body. */
-		return NULL;
-	}
-
-	buf = ast_http_get_contents(&content_length, ser, headers);
-	if (!buf || !content_length) {
-		/*
-		 * errno already set
-		 * or it is not an error to have zero content
-		 */
 		return NULL;
 	}
 
@@ -1399,6 +1458,34 @@ struct ast_variable *ast_http_get_post_vars(
 	}
 
 	return post_vars;
+}
+
+struct ast_variable *ast_http_get_post_vars(
+	struct ast_tcptls_session_instance *ser, struct ast_variable *headers)
+{
+	int content_length = 0;
+	RAII_VAR(char *, buf, NULL, ast_free);
+	RAII_VAR(char *, type, get_content_type(headers), ast_free);
+
+	/* Use errno to distinguish errors from no params */
+	errno = 0;
+
+	if (ast_strlen_zero(type) ||
+	    strcasecmp(type, "application/x-www-form-urlencoded")) {
+		/* Content type is not form data.  Don't read the body. */
+		return NULL;
+	}
+
+	buf = ast_http_get_contents(&content_length, ser, headers);
+	if (!buf || !content_length) {
+		/*
+		 * errno already set
+		 * or it is not an error to have zero content
+		 */
+		return NULL;
+	}
+
+	return ast_http_parse_post_form(buf, content_length, type);
 }
 
 static int handle_uri(struct ast_tcptls_session_instance *ser, char *uri,
@@ -1436,6 +1523,13 @@ static int handle_uri(struct ast_tcptls_session_instance *ser, char *uri,
 				prev = v;
 			}
 		}
+	}
+
+	/* Check path-based ACL restrictions */
+	if (check_restriction_acl(ser, uri) != 0) {
+		ast_http_request_close_on_completion(ser);
+		ast_http_error(ser, 403, "Forbidden", "Access denied by ACL");
+		goto cleanup;
 	}
 
 	AST_RWLIST_RDLOCK(&uri_redirects);
@@ -1489,7 +1583,8 @@ static int handle_uri(struct ast_tcptls_session_instance *ser, char *uri,
 		}
 		res = urih->callback(ser, urih, uri, method, get_vars, headers);
 	} else {
-		ast_debug(1, "Requested URI [%s] has no handler\n", uri);
+		ast_debug(1, "Request from %s for URI [%s] has no registered handler\n",
+			ast_sockaddr_stringify_addr(&ser->remote_address), uri);
 		ast_http_error(ser, 404, "Not Found", "The requested URL was not found on this server.");
 	}
 
@@ -1634,6 +1729,50 @@ struct ast_http_auth *ast_http_get_auth(struct ast_variable *headers)
 	}
 
 	return NULL;
+}
+
+struct ast_variable *ast_http_create_basic_auth_header(const char *userid,
+	const char *password)
+{
+	int encoded_size = 0;
+	int userinfo_len = 0;
+	RAII_VAR(char *, userinfo, NULL, ast_free);
+	char *encoded_userinfo = NULL;
+	struct ast_variable *auth_header = NULL;
+
+	if (ast_strlen_zero(userid)) {
+		return NULL;
+	}
+
+	if (strchr(userid, ':')) {
+		userinfo = ast_strdup(userid);
+		userinfo_len = strlen(userinfo);
+	} else {
+		if (ast_strlen_zero(password)) {
+			return NULL;
+		}
+		userinfo_len = ast_asprintf(&userinfo, "%s:%s", userid, password);
+	}
+	if (!userinfo) {
+		return NULL;
+	}
+
+	/*
+	 * The header value is "Basic " + base64(userinfo).
+	 * Doubling the userinfo length then adding the length
+	 * of the "Basic " prefix is a conservative estimate of the
+	 * final encoded size.
+	 */
+	encoded_size = userinfo_len * 2 * sizeof(char) + 1 + BASIC_LEN;
+	encoded_userinfo = ast_alloca(encoded_size);
+	strcpy(encoded_userinfo, BASIC_PREFIX); /* Safe */
+	ast_base64encode(encoded_userinfo + BASIC_LEN, (unsigned char *)userinfo,
+		userinfo_len, encoded_size - BASIC_LEN);
+
+	auth_header = ast_variable_new("Authorization",
+		encoded_userinfo, "");
+
+	return auth_header;
 }
 
 int ast_http_response_status_line(const char *buf, const char *version, int code)
@@ -2018,6 +2157,36 @@ done:
 }
 
 /*!
+ * \brief Check if a URI path is allowed or denied by acl
+ * \param ser TCP/TLS session instance
+ * \param uri The URI path to check
+ * \return 0 if allowed, -1 if denied
+ */
+static int check_restriction_acl(struct ast_tcptls_session_instance *ser, const char *uri)
+{
+	struct http_restriction *restriction;
+	int denied = 0;
+
+	AST_RWLIST_RDLOCK(&restrictions);
+	AST_RWLIST_TRAVERSE(&restrictions, restriction, entry) {
+		if (ast_begins_with(uri, restriction->path)) {
+			if (restriction->acl && !ast_acl_list_is_empty(restriction->acl)) {
+				if (ast_apply_acl(restriction->acl, &ser->remote_address,
+				    "HTTP Path ACL") == AST_SENSE_DENY) {
+					ast_debug(2, "HTTP request for uri '%s' from %s denied by acl by restriction on '%s'\n",
+						uri, ast_sockaddr_stringify(&ser->remote_address), restriction->path);
+					denied = -1;
+					break;
+				}
+			}
+		}
+	}
+	AST_RWLIST_UNLOCK(&restrictions);
+
+	return denied;
+}
+
+/*!
  * \brief Add a new URI redirect
  * The entries in the redirect list are sorted by length, just like the list
  * of URI handlers.
@@ -2370,14 +2539,18 @@ static int __ast_http_load(int reload)
 	struct ast_variable *v;
 	int enabled = 0;
 	int new_static_uri_enabled = 0;
-	int new_status_uri_enabled = 1; /* Default to enabled for BC */
+	int new_status_uri_enabled = 0;
 	char newprefix[MAX_PREFIX] = "";
 	char server_name[MAX_SERVER_NAME_LENGTH];
 	struct http_uri_redirect *redirect;
+	struct http_restriction *restriction;
+	struct http_restriction_list new_restrictions = AST_LIST_HEAD_NOLOCK_INIT_VALUE;
+	struct http_restriction_list old_restrictions = AST_LIST_HEAD_NOLOCK_INIT_VALUE;
 	struct ast_flags config_flags = { reload ? CONFIG_FLAG_FILEUNCHANGED : 0 };
 	uint32_t bindport = DEFAULT_PORT;
 	int http_tls_was_enabled = 0;
-	char *bindaddr = NULL;
+	const char *bindaddr = NULL;
+	const char *cat = NULL;
 
 	cfg = ast_config_load2("http.conf", "http", config_flags);
 	if (!cfg || cfg == CONFIG_STATUS_FILEINVALID) {
@@ -2492,6 +2665,61 @@ static int __ast_http_load(int reload)
 		}
 	}
 
+	while ((cat = ast_category_browse(cfg, cat))) {
+		const char *type;
+		struct http_restriction *new_restriction;
+		struct ast_acl_list *acl = NULL;
+		int acl_error = 0;
+		int acl_subscription_flag = 0;
+
+		if (strcasecmp(cat, "general") == 0) {
+			continue;
+		}
+
+		type = ast_variable_retrieve(cfg, cat, "type");
+		if (!type || strcasecmp(type, "restriction") != 0) {
+			continue;
+		}
+
+		new_restriction = ast_calloc(1, sizeof(*new_restriction) + strlen(cat) + 1);
+		if (!new_restriction) {
+			continue;
+		}
+
+		/* Safe */
+		strcpy(new_restriction->path, cat);
+
+		/* Parse ACL options for this restriction */
+		for (v = ast_variable_browse(cfg, cat); v; v = v->next) {
+			if (!strcasecmp(v->name, "permit") ||
+				!strcasecmp(v->name, "deny") ||
+				!strcasecmp(v->name, "acl")) {
+				ast_append_acl(v->name, v->value, &acl, &acl_error, &acl_subscription_flag);
+				if (acl_error) {
+					ast_log(LOG_ERROR, "Bad ACL '%s' at line '%d' of http.conf for restriction '%s'\n",
+						v->value, v->lineno, cat);
+				}
+			}
+		}
+
+		new_restriction->acl = acl;
+
+		AST_LIST_INSERT_TAIL(&new_restrictions, new_restriction, entry);
+		ast_debug(2, "HTTP: Added restriction for path '%s'\n", cat);
+	}
+
+	AST_RWLIST_WRLOCK(&restrictions);
+	AST_RWLIST_APPEND_LIST(&old_restrictions, &restrictions, entry);
+	AST_RWLIST_APPEND_LIST(&restrictions, &new_restrictions, entry);
+	AST_RWLIST_UNLOCK(&restrictions);
+
+	while ((restriction = AST_LIST_REMOVE_HEAD(&old_restrictions, entry))) {
+		if (restriction->acl) {
+			ast_free_acl_list(restriction->acl);
+		}
+		ast_free(restriction);
+	}
+
 	ast_config_destroy(cfg);
 
 	if (strcmp(prefix, newprefix)) {
@@ -2601,12 +2829,30 @@ static char *handle_show_http(struct ast_cli_entry *e, int cmd, struct ast_cli_a
 
 	ast_cli(a->fd, "\nEnabled Redirects:\n");
 	AST_RWLIST_RDLOCK(&uri_redirects);
-	AST_RWLIST_TRAVERSE(&uri_redirects, redirect, entry)
-		ast_cli(a->fd, "  %s => %s\n", redirect->target, redirect->dest);
 	if (AST_RWLIST_EMPTY(&uri_redirects)) {
 		ast_cli(a->fd, "  None.\n");
+	} else {
+		AST_RWLIST_TRAVERSE(&uri_redirects, redirect, entry)
+			ast_cli(a->fd, "  %s => %s\n", redirect->target, redirect->dest);
 	}
 	AST_RWLIST_UNLOCK(&uri_redirects);
+
+	ast_cli(a->fd, "\nPath Restrictions:\n");
+	AST_RWLIST_RDLOCK(&restrictions);
+	if (AST_RWLIST_EMPTY(&restrictions)) {
+		ast_cli(a->fd, "  None.\n");
+	} else {
+		struct http_restriction *restriction;
+		AST_RWLIST_TRAVERSE(&restrictions, restriction, entry) {
+			ast_cli(a->fd, "  Path: %s\n", restriction->path);
+			if (restriction->acl && !ast_acl_list_is_empty(restriction->acl)) {
+				ast_acl_output(a->fd, restriction->acl, "    ");
+			} else {
+				ast_cli(a->fd, "    No ACL configured\n");
+			}
+		}
+	}
+	AST_RWLIST_UNLOCK(&restrictions);
 
 	return CLI_SUCCESS;
 }
@@ -2623,6 +2869,7 @@ static struct ast_cli_entry cli_http[] = {
 static int unload_module(void)
 {
 	struct http_uri_redirect *redirect;
+	struct http_restriction *restriction;
 	ast_cli_unregister_multiple(cli_http, ARRAY_LEN(cli_http));
 
 	ao2_cleanup(global_http_server);
@@ -2649,6 +2896,15 @@ static int unload_module(void)
 		ast_free(redirect);
 	}
 	AST_RWLIST_UNLOCK(&uri_redirects);
+
+	AST_RWLIST_WRLOCK(&restrictions);
+	while ((restriction = AST_RWLIST_REMOVE_HEAD(&restrictions, entry))) {
+		if (restriction->acl) {
+			ast_free_acl_list(restriction->acl);
+		}
+		ast_free(restriction);
+	}
+	AST_RWLIST_UNLOCK(&restrictions);
 
 	return 0;
 }

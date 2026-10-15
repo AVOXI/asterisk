@@ -58,6 +58,9 @@
 /*** DOCUMENTATION
 	<managerEvent language="en_US" name="Reload">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>12.0.0</version>
+			</since>
 			<synopsis>Raised when a module has been reloaded in Asterisk.</synopsis>
 			<syntax>
 				<parameter name="Module">
@@ -82,6 +85,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="Load">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>16.0.0</version>
+			</since>
 			<synopsis>Raised when a module has been loaded in Asterisk.</synopsis>
 			<syntax>
 				<parameter name="Module">
@@ -100,6 +106,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="Unload">
 		<managerEventInstance class="EVENT_FLAG_SYSTEM">
+			<since>
+				<version>16.0.0</version>
+			</since>
 			<synopsis>Raised when a module has been unloaded in Asterisk.</synopsis>
 			<syntax>
 				<parameter name="Module">
@@ -1537,7 +1546,7 @@ char *ast_module_helper(const char *line, const char *word, int pos, int state, 
 	}
 
 	/* Tab completion can't be used during startup, or CLI and loader will deadlock. */
-	if (!ast_test_flag(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)) {
+	if (!ast_fully_booted) {
 		return NULL;
 	}
 
@@ -2367,7 +2376,7 @@ static int loader_builtin_init(struct load_order *load_order)
 			continue;
 		}
 
-		/* Parse dependendencies from mod->info. */
+		/* Parse dependencies from mod->info. */
 		if (module_post_register(mod)) {
 			return -1;
 		}

@@ -27,6 +27,7 @@
 
 #include "asterisk/stasis_channels.h"
 #include "asterisk/stasis_app.h"
+#include "asterisk/causes.h"
 
 #include "command.h"
 #include "control.h"
@@ -102,6 +103,11 @@ struct stasis_app_control {
 	 * When set, /c app_stasis should exit and continue in the dialplan.
 	 */
 	unsigned int is_done:1;
+	/*!
+	 * When set, /c app_stasis should exit indicating failure and continue
+	 * in the dialplan.
+	 */
+	unsigned int failed:1;
 };
 
 static void control_dtor(void *obj)
@@ -368,6 +374,17 @@ void control_mark_done(struct stasis_app_control *control)
 	ao2_unlock(control->command_queue);
 }
 
+void stasis_app_control_mark_failed(struct stasis_app_control *control)
+{
+	control->failed = 1;
+}
+
+int stasis_app_control_is_failed(const struct stasis_app_control *control)
+{
+	return control->failed;
+}
+
+
 struct stasis_app_control_continue_data {
 	char context[AST_MAX_CONTEXT];
 	char extension[AST_MAX_EXTENSION];
@@ -620,6 +637,21 @@ int stasis_app_control_ring_stop(struct stasis_app_control *control)
 	return 0;
 }
 
+static int app_control_progress(struct stasis_app_control *control,
+	struct ast_channel *chan, void *data)
+{
+	ast_indicate(control->channel, AST_CONTROL_PROGRESS);
+
+	return 0;
+}
+
+int stasis_app_control_progress(struct stasis_app_control *control)
+{
+	stasis_app_send_command_async(control, app_control_progress, NULL, NULL);
+
+	return 0;
+}
+
 struct stasis_app_control_mute_data {
 	enum ast_frame_type frametype;
 	unsigned int direction;
@@ -696,6 +728,8 @@ struct chanvar {
 	char *name;
 	/*! Value of variable to set. If unsetting, this will be NULL */
 	char *value;
+	/*! Whether this variable should be included in channel events */
+	unsigned int report_events;
 };
 
 static void free_chanvar(void *data)
@@ -711,13 +745,32 @@ static int app_control_set_channel_var(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
 	struct chanvar *var = data;
+	/*
+	 * Save the current inhibit state then enable it.
+	 */
+	int inhibited = ast_thread_inhibit_escalations_swap(1);
+
+	if (ast_channel_set_ari_var_reportable(control->channel, var->name, var->report_events)) {
+		return -1;
+	}
 
 	pbx_builtin_setvar_helper(control->channel, var->name, var->value);
+	/*
+	 * Re-enable it if it was originally enabled.
+	 */
+	if (inhibited > 0) {
+		ast_thread_inhibit_escalations();
+	}
 
 	return 0;
 }
 
 int stasis_app_control_set_channel_var(struct stasis_app_control *control, const char *variable, const char *value)
+{
+	return stasis_app_control_set_channel_var_reportable(control, variable, value, 0);
+}
+
+int stasis_app_control_set_channel_var_reportable(struct stasis_app_control *control, const char *variable, const char *value, int report_events)
 {
 	struct chanvar *var;
 
@@ -741,9 +794,9 @@ int stasis_app_control_set_channel_var(struct stasis_app_control *control, const
 		}
 	}
 
-	stasis_app_send_command_async(control, app_control_set_channel_var, var, free_chanvar);
+	var->report_events = report_events ? 1 : 0;
 
-	return 0;
+	return stasis_app_send_command(control, app_control_set_channel_var, var, free_chanvar);
 }
 
 static int app_control_hold(struct stasis_app_control *control,
@@ -1198,13 +1251,24 @@ static void bridge_after_cb_failed(enum ast_bridge_after_cb_reason reason,
  * to keep the timeout information local to the channel.
  * That is what this datastore is for
  */
+
+static void timeout_datastore_data_destructor(void *data)
+{
+	ast_free(data);
+}
+
 struct ast_datastore_info timeout_datastore = {
 	.type = "ARI dial timeout",
+	.destroy = timeout_datastore_data_destructor,
 };
 
 static int hangup_channel(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
+	/* Set cause code to No Answer to be consistent with other dial timeout operations */
+	ast_channel_lock(chan);
+	ast_channel_hangupcause_set(chan, AST_CAUSE_NO_ANSWER);
+	ast_channel_unlock(chan);
 	ast_softhangup(chan, AST_SOFTHANGUP_EXPLICIT);
 	return 0;
 }

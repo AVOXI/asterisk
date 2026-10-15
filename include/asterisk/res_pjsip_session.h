@@ -195,7 +195,7 @@ struct ast_sip_session {
 	struct ao2_container *datastores;
 	/*! Serializer for tasks relating to this SIP session */
 	struct ast_taskprocessor *serializer;
-	/*! Non-null if the session serializer is suspended or being suspended. */
+	/*! \deprecated Non-null if the session serializer is suspended or being suspended. */
 	struct ast_sip_session_suspender *suspended;
 	/*! Requests that could not be sent due to current inv_session state */
 	AST_LIST_HEAD_NOLOCK(, ast_sip_session_delayed_request) delayed_requests;
@@ -217,6 +217,8 @@ struct ast_sip_session {
 	unsigned int defer_terminate:1;
 	/*! Termination requested while termination deferred */
 	unsigned int terminate_while_deferred:1;
+	/*! Transferhandling ari */
+	unsigned int transferhandling_ari:1;
 	/*! Deferred incoming re-invite */
 	pjsip_rx_data *deferred_reinvite;
 	/*! Current T.38 state */
@@ -362,6 +364,31 @@ struct ast_sip_session_supplement {
 	 * Defaults to AST_SIP_SESSION_BEFORE_MEDIA
 	 */
 	enum ast_sip_session_response_priority response_priority;
+	/*!
+	 * \brief Called before an outgoing session is created
+	 *
+	 * This is called before the session dialog is created and can be used to
+	 * block the creation of the session entirely.  A non-zero return value
+	 * prevents the session from being created.  The callback is called from
+	 * the global supplement list, not per-session, so the session does not
+	 * yet exist when this is called.
+	 *
+	 * \since 20.20.0
+	 * \since 22.10.0
+	 * \since 23.4.0
+	 *
+	 * \param endpoint The endpoint the outgoing session would be created for
+	 * \param contact The contact to use for the outgoing session, or NULL
+	 * \param location Name of the location to call, be it named location or explicit URI, or NULL
+	 * \param request_user Optional request user to place in the request URI, or NULL
+	 * \param req_topology The requested stream capabilities
+	 *
+	 * \retval non-zero Block session creation
+	 * \retval 0 Allow session creation
+	 */
+	int (*session_create)(struct ast_sip_endpoint *endpoint,
+		struct ast_sip_contact *contact, const char *location,
+		const char *request_user, struct ast_stream_topology *req_topology);
 };
 
 enum ast_sip_session_sdp_stream_defer {
@@ -624,6 +651,33 @@ void ast_sip_session_register_supplement_with_module(struct ast_module *module, 
 void ast_sip_session_unregister_supplement(struct ast_sip_session_supplement *supplement);
 
 /*!
+ * \brief Check registered supplements for permission to create an outgoing session
+ *
+ * Iterates the global supplement list and calls any registered \c session_create
+ * callbacks.  The first callback to return a non-zero value stops the iteration
+ * and causes this function to return -1, blocking the session creation.
+ *
+ * This is called at the beginning of ast_sip_session_create_outgoing() before
+ * any dialog or invite session resources are allocated.
+ *
+ * \since 20.20.0
+ * \since 22.10.0
+ * \since 23.4.0
+ *
+ * \param endpoint The endpoint the outgoing session would be created for
+ * \param contact The contact to use for the outgoing session, or NULL
+ * \param location Name of the location to call, be it named location or explicit URI, or NULL
+ * \param request_user Optional request user to place in the request URI, or NULL
+ * \param req_topology The requested stream capabilities
+ *
+ * \retval 0 Session creation is allowed
+ * \retval -1 Session creation is blocked by a supplement
+ */
+int ast_sip_session_check_supplement_create(struct ast_sip_endpoint *endpoint,
+	struct ast_sip_contact *contact, const char *location,
+	const char *request_user, struct ast_stream_topology *req_topology);
+
+/*!
  * \brief Add supplements to a SIP session
  *
  * \param session The session to initialize
@@ -783,6 +837,21 @@ int ast_sip_session_create_invite(struct ast_sip_session *session, pjsip_tx_data
  */
 void ast_sip_session_send_request_with_cb(struct ast_sip_session *session, pjsip_tx_data *tdata,
 		ast_sip_session_response_cb on_response);
+
+/*!
+ * \brief Keep an in-dialog request from changing call state
+ *
+ * The INVITE session authenticates 401/407/494 by resending the request, and
+ * session supplements may apply a response Reason header to the channel.
+ * Call this on the session serializer after the request is built and before
+ * it is sent. Responses to that request then leave the dialog's challenge
+ * budget, hangup cause, and media state alone.
+ *
+ * \param tdata Request about to be sent on the session dialog
+ * \retval 0 Success
+ * \retval -1 Failure. The caller must not send tdata.
+ */
+int ast_sip_session_suppress_response_side_effects(pjsip_tx_data *tdata);
 
 /*!
  * \brief Retrieves a session from a dialog

@@ -42,6 +42,9 @@
 
 /*** DOCUMENTATION
 	<application name="Answer" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Answer a channel if ringing.
 		</synopsis>
@@ -72,6 +75,9 @@
 		</see-also>
 	</application>
 	<application name="BackGround" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Play an audio file while waiting for digits of an extension to go to.
 		</synopsis>
@@ -138,6 +144,9 @@
 		</see-also>
 	</application>
 	<application name="Busy" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Indicate the Busy condition.
 		</synopsis>
@@ -158,6 +167,9 @@
 		</see-also>
 	</application>
 	<application name="Congestion" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Indicate the Congestion condition.
 		</synopsis>
@@ -178,6 +190,9 @@
 		</see-also>
 	</application>
 	<application name="ExecIfTime" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Conditional application execution based on the current time.
 		</synopsis>
@@ -205,13 +220,16 @@
 		</see-also>
 	</application>
 	<application name="Goto" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Jump to a particular priority, extension, or context.
 		</synopsis>
 		<syntax>
-			<parameter name="context" />
-			<parameter name="extensions" />
-			<parameter name="priority" required="true" />
+			<parameter name="context" documentationtype="dialplan_context" />
+			<parameter name="extension" documentationtype="dialplan_extension" />
+			<parameter name="priority" documentationtype="dialplan_priority" required="true" />
 		</syntax>
 		<description>
 			<para>This application will set the current context, extension, and priority in the channel structure.
@@ -237,6 +255,9 @@
 		</see-also>
 	</application>
 	<application name="GotoIf" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Conditional goto.
 		</synopsis>
@@ -275,6 +296,9 @@
 		</see-also>
 	</application>
 	<application name="GotoIfTime" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Conditional Goto based on the current time.
 		</synopsis>
@@ -316,6 +340,9 @@
 		</see-also>
 	</application>
 	<application name="Hangup" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Hang up the calling channel.
 		</synopsis>
@@ -335,6 +362,9 @@
 		</see-also>
 	</application>
 	<application name="Incomplete" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Returns AST_PBX_INCOMPLETE value.
 		</synopsis>
@@ -352,6 +382,9 @@
 		</description>
 	</application>
 	<application name="NoOp" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Do Nothing (No Operation).
 		</synopsis>
@@ -370,6 +403,9 @@
 		</see-also>
 	</application>
 	<application name="Proceeding" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Indicate proceeding.
 		</synopsis>
@@ -379,6 +415,9 @@
 		</description>
 	</application>
 	<application name="Progress" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Indicate progress.
 		</synopsis>
@@ -394,6 +433,9 @@
 		</see-also>
 	</application>
 	<application name="RaiseException" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Handle an exceptional condition.
 		</synopsis>
@@ -409,6 +451,9 @@
 		</see-also>
 	</application>
 	<application name="Ringing" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Indicate ringing tone.
 		</synopsis>
@@ -424,6 +469,9 @@
 		</see-also>
 	</application>
 	<application name="SayAlpha" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Say Alpha.
 		</synopsis>
@@ -435,7 +483,7 @@
 			of the given <replaceable>string</replaceable>. If the channel variable
 			<variable>SAY_DTMF_INTERRUPT</variable> is set to 'true' (case insensitive),
 			then this application will react to DTMF in the	same way as
-			<literal>Background</literal>.</para>
+			<literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayDigits</ref>
@@ -448,6 +496,9 @@
 		</see-also>
 	</application>
 	<application name="SayAlphaCase" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Say Alpha.
 		</synopsis>
@@ -479,7 +530,7 @@
 			given <replaceable>string</replaceable>.  Optionally, a <replaceable>casetype</replaceable> may be
 			specified.  This will be used for case-insensitive or case-sensitive pronunciations. If the channel
 			variable <variable>SAY_DTMF_INTERRUPT</variable> is set to 'true' (case insensitive), then this
-			application will react to DTMF in the same way as <literal>Background</literal>.</para>
+			application will react to DTMF in the same way as <literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayDigits</ref>
@@ -492,6 +543,9 @@
 		</see-also>
 	</application>
 	<application name="SayDigits" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Say Digits.
 		</synopsis>
@@ -503,7 +557,7 @@
 			the given number. This will use the language that is currently set for the channel.
 			If the channel variable <variable>SAY_DTMF_INTERRUPT</variable> is set to 'true'
 			(case insensitive), then this application will react to DTMF in the same way as
-			<literal>Background</literal>.</para>
+			<literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayAlpha</ref>
@@ -516,6 +570,10 @@
 		</see-also>
 	</application>
 	<application name="SayMoney" language="en_US">
+		<since>
+			<version>16.21.0</version>
+			<version>18.7.0</version>
+		</since>
 		<synopsis>
 			Say Money.
 		</synopsis>
@@ -527,7 +585,7 @@
 			in the current language. Currently only English and US Dollars is supported.
 			If the channel variable <variable>SAY_DTMF_INTERRUPT</variable> is set to 'true'
 			(case insensitive), then this application will react to DTMF in the same way as
-			<literal>Background</literal>.</para>
+			<literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayAlpha</ref>
@@ -539,6 +597,9 @@
 		</see-also>
 	</application>
 	<application name="SayNumber" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Say Number.
 		</synopsis>
@@ -552,7 +613,7 @@
 			specified. This will use the language that is currently set for the channel. See the CHANNEL()
 			function for more information on setting the language for the channel. If the channel variable
 			<variable>SAY_DTMF_INTERRUPT</variable> is set to 'true' (case insensitive), then this
-			application will react to DTMF in the same way as <literal>Background</literal>.</para>
+			application will react to DTMF in the same way as <literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayAlpha</ref>
@@ -564,6 +625,10 @@
 		</see-also>
 	</application>
 	<application name="SayOrdinal" language="en_US">
+		<since>
+			<version>16.21.0</version>
+			<version>18.7.0</version>
+		</since>
 		<synopsis>
 			Say Ordinal Number.
 		</synopsis>
@@ -578,7 +643,7 @@
 			specified. This will use the language that is currently set for the channel. See the CHANNEL()
 			function for more information on setting the language for the channel. If the channel variable
 			<variable>SAY_DTMF_INTERRUPT</variable> is set to 'true' (case insensitive), then this
-			application will react to DTMF in the same way as <literal>Background</literal>.</para>
+			application will react to DTMF in the same way as <literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayAlpha</ref>
@@ -591,6 +656,9 @@
 		</see-also>
 	</application>
 	<application name="SayPhonetic" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Say Phonetic.
 		</synopsis>
@@ -601,7 +669,7 @@
 			<para>This application will play the sounds from the phonetic alphabet that correspond to the
 			letters in the given <replaceable>string</replaceable>. If the channel variable
 			<variable>SAY_DTMF_INTERRUPT</variable> is set to 'true' (case insensitive), then this
-			application will react to DTMF in the same way as <literal>Background</literal>.</para>
+			application will react to DTMF in the same way as <literal>BackGround</literal>.</para>
 		</description>
 		<see-also>
 			<ref type="application">SayAlpha</ref>
@@ -613,6 +681,9 @@
 		</see-also>
 	</application>
 	<application name="Wait" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Waits for some time.
 		</synopsis>
@@ -627,6 +698,9 @@
 		</description>
 	</application>
 	<application name="WaitDigit" language="en_US">
+		<since>
+			<version>15.0.0</version>
+		</since>
 		<synopsis>
 			Waits for a digit to be entered.
 		</synopsis>
@@ -663,6 +737,9 @@
 		</see-also>
 	</application>
 	<application name="WaitExten" language="en_US">
+		<since>
+			<version>13.8.0</version>
+		</since>
 		<synopsis>
 			Waits for an extension to be entered.
 		</synopsis>
@@ -681,8 +758,11 @@
 						</argument>
 					</option>
 					<option name="d">
-						<para>Play <literal>dial</literal> indications tone on channel while waiting
-						for digits.</para>
+						<para>Play indications tone on channel while waiting for digits.</para>
+						<argument name="x">
+							<para>Specify the indications tone to play.
+							Default is <literal>dial</literal> tone.</para>
+						</argument>
 					</option>
 				</optionlist>
 			</parameter>
@@ -692,7 +772,7 @@
 			of <replaceable>seconds</replaceable>.</para>
 		</description>
 		<see-also>
-			<ref type="application">Background</ref>
+			<ref type="application">BackGround</ref>
 			<ref type="function">TIMEOUT</ref>
 		</see-also>
 	</application>
@@ -710,12 +790,21 @@ AST_APP_OPTIONS(background_opts, {
 	AST_APP_OPTION('p', BACKGROUND_PLAYBACK),
 });
 
-#define WAITEXTEN_MOH		(1 << 0)
-#define WAITEXTEN_DIALTONE	(1 << 1)
+enum {
+	WAITEXTEN_MOH = (1 << 0),
+	WAITEXTEN_DIALTONE = (1 << 1),
+};
+
+enum read_option_flags {
+	WAITEXTEN_ARG_MOH,
+	WAITEXTEN_ARG_DIALTONE,
+	/* note: this entry _MUST_ be the last one in the enum */
+	WAITEXTEN_ARRAY_SIZE,
+};
 
 AST_APP_OPTIONS(waitexten_opts, {
-	AST_APP_OPTION_ARG('m', WAITEXTEN_MOH, 0),
-	AST_APP_OPTION_ARG('d', WAITEXTEN_DIALTONE, 0),
+	AST_APP_OPTION_ARG('m', WAITEXTEN_MOH, WAITEXTEN_ARG_MOH),
+	AST_APP_OPTION_ARG('d', WAITEXTEN_DIALTONE, WAITEXTEN_ARG_DIALTONE),
 });
 
 int pbx_builtin_raise_exception(struct ast_channel *chan, const char *reason)
@@ -1052,7 +1141,7 @@ static int pbx_builtin_waitexten(struct ast_channel *chan, const char *data)
 {
 	int ms, res;
 	struct ast_flags flags = {0};
-	char *opts[1] = { NULL };
+	char *opt_args[WAITEXTEN_ARRAY_SIZE];
 	char *parse;
 	AST_DECLARE_APP_ARGS(args,
 		AST_APP_ARG(timeout);
@@ -1066,15 +1155,17 @@ static int pbx_builtin_waitexten(struct ast_channel *chan, const char *data)
 		memset(&args, 0, sizeof(args));
 
 	if (args.options)
-		ast_app_parse_options(waitexten_opts, &flags, opts, args.options);
+		ast_app_parse_options(waitexten_opts, &flags, opt_args, args.options);
 
-	if (ast_test_flag(&flags, WAITEXTEN_MOH) && !opts[0] ) {
-		ast_log(LOG_WARNING, "The 'm' option has been specified for WaitExten without a class.\n");
-	} else if (ast_test_flag(&flags, WAITEXTEN_MOH)) {
-		ast_indicate_data(chan, AST_CONTROL_HOLD, S_OR(opts[0], NULL),
-			!ast_strlen_zero(opts[0]) ? strlen(opts[0]) + 1 : 0);
+	if (ast_test_flag(&flags, WAITEXTEN_MOH)) {
+		if (ast_strlen_zero(opt_args[WAITEXTEN_ARG_MOH])) {
+			ast_log(LOG_WARNING, "The 'm' option has been specified for WaitExten without a class.\n");
+		}
+		ast_indicate_data(chan, AST_CONTROL_HOLD, S_OR(opt_args[WAITEXTEN_ARG_MOH], NULL),
+			!ast_strlen_zero(opt_args[WAITEXTEN_ARG_MOH]) ? strlen(opt_args[WAITEXTEN_ARG_MOH]) + 1 : 0);
 	} else if (ast_test_flag(&flags, WAITEXTEN_DIALTONE)) {
-		struct ast_tone_zone_sound *ts = ast_get_indication_tone(ast_channel_zone(chan), "dial");
+		const char *tone = !ast_strlen_zero(opt_args[WAITEXTEN_ARG_DIALTONE]) ? opt_args[WAITEXTEN_ARG_DIALTONE] : "dial";
+		struct ast_tone_zone_sound *ts = ast_get_indication_tone(ast_channel_zone(chan), tone);
 		if (ts) {
 			ast_playtones_start(chan, 0, ts->data, 0);
 			ts = ast_tone_zone_sound_unref(ts);

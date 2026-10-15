@@ -96,6 +96,9 @@
 
 /*** DOCUMENTATION
 	<function name="EXCEPTION" language="en_US">
+		<since>
+			<version>1.6.0</version>
+		</since>
 		<synopsis>
 			Retrieve the details of the current dialplan exception.
 		</synopsis>
@@ -127,6 +130,9 @@
 		</see-also>
 	</function>
 	<function name="TESTTIME" language="en_US">
+		<since>
+			<version>1.8.0</version>
+		</since>
 		<synopsis>
 			Sets a time to be used with the channel to test logical conditions.
 		</synopsis>
@@ -152,6 +158,9 @@
 		</see-also>
 	</function>
 	<manager name="ShowDialPlan" language="en_US">
+		<since>
+			<version>1.6.0</version>
+		</since>
 		<synopsis>
 			Show dialplan contexts and extensions
 		</synopsis>
@@ -170,6 +179,9 @@
 		</description>
 	</manager>
 	<manager name="ExtensionStateList" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			List the current known extension states.
 		</synopsis>
@@ -193,6 +205,9 @@
 			</list-elements>
 			<managerEvent name="ExtensionStateListComplete" language="en_US">
 				<managerEventInstance class="EVENT_FLAG_COMMAND">
+					<since>
+						<version>13.0.0</version>
+					</since>
 					<synopsis>
 						Indicates the end of the list the current known extension states.
 					</synopsis>
@@ -1007,7 +1022,7 @@ static void pbx_destroy(struct ast_pbx *p)
  * in a similar collating sequence as sorting alphabetic strings, from left to
  * right. Thus, "1XXXXX" comes before "X11111", and would be the "better" match,
  * because "1" is more specific than "X".
- * So, to accomodate this philosophy, I sort the tree branches along the alt_char
+ * So, to accommodate this philosophy, I sort the tree branches along the alt_char
  * line so they are lowest to highest in specificity numbers. This way, as soon
  * as we encounter our first complete match, we automatically have the "best"
  * match and can stop the traversal immediately. Same for CANMATCH/MATCHMORE.
@@ -2805,15 +2820,20 @@ static const struct ast_datastore_info exception_store_info = {
  */
 int raise_exception(struct ast_channel *chan, const char *reason, int priority)
 {
-	struct ast_datastore *ds = ast_channel_datastore_find(chan, &exception_store_info, NULL);
-	struct pbx_exception *exception = NULL;
+	struct ast_datastore *ds;
+	struct pbx_exception *exception;
 
+	ast_channel_lock(chan);
+	ds = ast_channel_datastore_find(chan, &exception_store_info, NULL);
 	if (!ds) {
 		ds = ast_datastore_alloc(&exception_store_info, NULL);
-		if (!ds)
+		if (!ds) {
+			ast_channel_unlock(chan);
 			return -1;
+		}
 		if (!(exception = ast_calloc_with_stringfields(1, struct pbx_exception, 128))) {
 			ast_datastore_free(ds);
+			ast_channel_unlock(chan);
 			return -1;
 		}
 		ds->data = exception;
@@ -2825,16 +2845,24 @@ int raise_exception(struct ast_channel *chan, const char *reason, int priority)
 	ast_string_field_set(exception, context, ast_channel_context(chan));
 	ast_string_field_set(exception, exten, ast_channel_exten(chan));
 	exception->priority = ast_channel_priority(chan);
+	ast_channel_unlock(chan);
+
 	set_ext_pri(chan, "e", priority);
 	return 0;
 }
 
 static int acf_exception_read(struct ast_channel *chan, const char *name, char *data, char *buf, size_t buflen)
 {
-	struct ast_datastore *ds = ast_channel_datastore_find(chan, &exception_store_info, NULL);
-	struct pbx_exception *exception = NULL;
-	if (!ds || !ds->data)
+	struct ast_datastore *ds;
+	struct pbx_exception *exception;
+	int res = 0;
+
+	ast_channel_lock(chan);
+	ds = ast_channel_datastore_find(chan, &exception_store_info, NULL);
+	if (!ds || !ds->data) {
+		ast_channel_unlock(chan);
 		return -1;
+	}
 	exception = ds->data;
 	if (!strcasecmp(data, "REASON"))
 		ast_copy_string(buf, exception->reason, buflen);
@@ -2845,8 +2873,10 @@ static int acf_exception_read(struct ast_channel *chan, const char *name, char *
 	else if (!strcasecmp(data, "PRIORITY"))
 		snprintf(buf, buflen, "%d", exception->priority);
 	else
-		return -1;
-	return 0;
+		res = -1;
+
+	ast_channel_unlock(chan);
+	return res;
 }
 
 static struct ast_custom_function exception_function = {
@@ -2927,11 +2957,17 @@ static int pbx_extension_helper(struct ast_channel *c, struct ast_context *con,
 				ast_log(LOG_WARNING, "No application '%s' for extension (%s, %s, %d)\n", e->app, context, exten, priority);
 				return -1;
 			}
+			ast_channel_lock(c);
+			if (ast_channel_softhangup_internal_flag(c) & AST_SOFTHANGUP_ASYNCGOTO) {
+				ast_channel_unlock(c);
+				return 0;
+			}
 			if (ast_channel_context(c) != context)
 				ast_channel_context_set(c, context);
 			if (ast_channel_exten(c) != exten)
 				ast_channel_exten_set(c, exten);
 			ast_channel_priority_set(c, priority);
+			ast_channel_unlock(c);
 			if (substitute) {
 				pbx_substitute_variables_helper(c, substitute, passdata, sizeof(passdata)-1);
 			}
@@ -4326,7 +4362,7 @@ static enum ast_pbx_result __ast_pbx_run(struct ast_channel *c,
 	callid = ast_read_threadstorage_callid();
 	/* If the thread isn't already associated with a callid, we should create that association. */
 	if (!callid) {
-		/* Associate new PBX thread with the channel call id if it is availble.
+		/* Associate new PBX thread with the channel call id if it is available.
 		 * If not, create a new one instead.
 		 */
 		callid = ast_channel_callid(c);
@@ -4714,7 +4750,7 @@ enum ast_pbx_result ast_pbx_start(struct ast_channel *c)
 		return AST_PBX_FAILED;
 	}
 
-	if (!ast_test_flag(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)) {
+	if (!ast_fully_booted) {
 		ast_log(LOG_WARNING, "PBX requires Asterisk to be fully booted\n");
 		return AST_PBX_FAILED;
 	}
@@ -4736,7 +4772,7 @@ enum ast_pbx_result ast_pbx_run_args(struct ast_channel *c, struct ast_pbx_args 
 {
 	enum ast_pbx_result res = AST_PBX_SUCCESS;
 
-	if (!ast_test_flag(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)) {
+	if (!ast_fully_booted) {
 		ast_log(LOG_WARNING, "PBX requires Asterisk to be fully booted\n");
 		return AST_PBX_FAILED;
 	}
@@ -6593,6 +6629,10 @@ void ast_merge_contexts_and_delete(struct ast_context **extcontexts, struct ast_
 	/* Create all applicable autohint contexts */
 	context_table_create_autohints(contexts_table);
 
+	/* ctx_count is still the number of old contexts before the merge,
+	 * use the new count when we tell the user how many contexts exist. */
+	ctx_count = ast_hashtab_size(contexts_table);
+
 	ao2_unlock(hints);
 	ast_unlock_contexts();
 
@@ -6949,6 +6989,10 @@ int ast_explicit_goto(struct ast_channel *chan, const char *context, const char 
 
 	ast_channel_lock(chan);
 
+	if (ast_channel_softhangup_internal_flag(chan) & AST_SOFTHANGUP_ASYNCGOTO) {
+		ast_channel_unlock(chan);
+		return -1;
+	}
 	if (!ast_strlen_zero(context))
 		ast_channel_context_set(chan, context);
 	if (!ast_strlen_zero(exten))
@@ -7773,10 +7817,10 @@ static int pbx_outgoing_attempt(const char *type, struct ast_format_cap *cap,
 		return -1;
 	}
 
-	ast_channel_lock(dialed);
 	if (vars) {
 		ast_set_variables(dialed, vars);
 	}
+	ast_channel_lock(dialed);
 	if (!ast_strlen_zero(account)) {
 		ast_channel_stage_snapshot(dialed);
 		ast_channel_accountcode_set(dialed, account);
@@ -7961,10 +8005,10 @@ int ast_pbx_outgoing_exten_predial(const char *type, struct ast_format_cap *cap,
 		if (failed) {
 			char failed_reason[12];
 
-			ast_set_variables(failed, vars);
 			snprintf(failed_reason, sizeof(failed_reason), "%d", *reason);
 			pbx_builtin_setvar_helper(failed, "REASON", failed_reason);
 			ast_channel_unlock(failed);
+			ast_set_variables(failed, vars);
 
 			if (ast_pbx_run(failed)) {
 				ast_log(LOG_ERROR, "Unable to run PBX on '%s'\n",

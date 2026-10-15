@@ -887,6 +887,7 @@ void ast_unreal_call_setup(struct ast_channel *semi1, struct ast_channel *semi2)
 	ast_connected_line_copy_to_caller(ast_channel_caller(semi2), ast_channel_connected(semi1));
 	ast_connected_line_copy_from_caller(ast_channel_connected(semi2), ast_channel_caller(semi1));
 
+	ast_channel_adsicpe_set(semi2, ast_channel_adsicpe(semi1));
 	ast_channel_language_set(semi2, ast_channel_language(semi1));
 	ast_channel_musicclass_set(semi2, ast_channel_musicclass(semi1));
 	ast_channel_parkinglot_set(semi2, ast_channel_parkinglot(semi1));
@@ -895,7 +896,9 @@ void ast_unreal_call_setup(struct ast_channel *semi1, struct ast_channel *semi2)
 	ast_channel_accountcode_set(semi2, ast_channel_peeraccount(semi1));
 	ast_channel_peeraccount_set(semi2, ast_channel_accountcode(semi1));
 
-	ast_channel_cc_params_init(semi2, ast_channel_get_cc_config_params(semi1));
+	if (ast_cc_is_enabled()) {
+		ast_channel_cc_params_init(semi2, ast_channel_get_cc_config_params(semi1));
+	}
 
 	/*
 	 * Make sure we inherit the AST_CAUSE_ANSWERED_ELSEWHERE if it's
@@ -1041,7 +1044,7 @@ int ast_unreal_hangup(struct ast_unreal_pvt *p, struct ast_channel *ast)
 		ast_clear_flag(p, AST_UNREAL_CARETAKER_THREAD);
 		p->chan = NULL;
 		if (p->owner) {
-			const char *status = pbx_builtin_getvar_helper(p->chan, "DIALSTATUS");
+			const char *status = pbx_builtin_getvar_helper(chan, "DIALSTATUS");
 
 			if (status) {
 				ast_channel_hangupcause_set(p->owner, cause);
@@ -1169,7 +1172,7 @@ struct ast_channel *ast_unreal_new_channels(struct ast_unreal_pvt *p,
 	struct ast_assigned_ids id2 = {NULL, NULL};
 	int generated_seqno = ast_atomic_fetchadd_int((int *) &name_sequence, +1);
 	int i;
-	struct ast_stream_topology *chan_topology;
+	RAII_VAR(struct ast_stream_topology *, chan_topology, NULL, ast_stream_topology_free);
 	struct ast_stream *stream;
 
 	/* set unique ids for the two channels */
@@ -1221,7 +1224,6 @@ struct ast_channel *ast_unreal_new_channels(struct ast_unreal_pvt *p,
 		"%s/%s-%08x;1", tech->type, p->name, (unsigned)generated_seqno);
 	if (!owner) {
 		ast_log(LOG_WARNING, "Unable to allocate owner channel structure\n");
-		ast_stream_topology_free(chan_topology);
 		return NULL;
 	}
 
@@ -1259,16 +1261,17 @@ struct ast_channel *ast_unreal_new_channels(struct ast_unreal_pvt *p,
 
 	ast_jb_configure(owner, &p->jb_conf);
 
-	if (ast_channel_cc_params_init(owner, requestor
-		? ast_channel_get_cc_config_params((struct ast_channel *) requestor) : NULL)) {
-		ast_channel_tech_pvt_set(owner, NULL);
-		ao2_ref(p, -1);
-		ast_channel_tech_pvt_set(owner, NULL);
-		ast_channel_unlock(owner);
-		ast_channel_release(owner);
-		return NULL;
+	if (ast_cc_is_enabled()) {
+		if (ast_channel_cc_params_init(owner, requestor
+			? ast_channel_get_cc_config_params((struct ast_channel *) requestor) : NULL)) {
+			ast_channel_tech_pvt_set(owner, NULL);
+			ao2_ref(p, -1);
+			ast_channel_tech_pvt_set(owner, NULL);
+			ast_channel_unlock(owner);
+			ast_channel_release(owner);
+			return NULL;
+		}
 	}
-
 	p->owner = owner;
 	ast_channel_unlock(owner);
 
@@ -1295,7 +1298,7 @@ struct ast_channel *ast_unreal_new_channels(struct ast_unreal_pvt *p,
 	ast_channel_nativeformats_set(chan, p->reqcap);
 
 	if (ast_channel_is_multistream(chan)) {
-		ast_channel_set_stream_topology(chan, chan_topology);
+		ast_channel_set_stream_topology(chan, ao2_bump(chan_topology));
 	}
 
 	/* Format was already determined when setting up owner */

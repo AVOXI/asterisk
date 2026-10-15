@@ -267,9 +267,25 @@ static int create_rtp(struct ast_sip_session *session, struct ast_sip_session_me
 		}
 	}
 
-	if (!(session_media->rtp = ast_rtp_instance_new(session->endpoint->media.rtp.engine, sched, media_address, NULL))) {
-		ast_log(LOG_ERROR, "Unable to create RTP instance using RTP engine '%s'\n", session->endpoint->media.rtp.engine);
-		return -1;
+	if (session->endpoint->media.rtp.port_start && session->endpoint->media.rtp.port_end) {
+		struct ast_rtp_instance_options options = {
+			.port_start = session->endpoint->media.rtp.port_start,
+			.port_end = session->endpoint->media.rtp.port_end,
+		};
+		if (!(session_media->rtp = ast_rtp_instance_new_with_options(
+				session->endpoint->media.rtp.engine, sched, media_address, NULL,
+				&options))) {
+			ast_log(LOG_ERROR, "Unable to create RTP instance using RTP engine '%s' with port range %u-%u\n",
+				session->endpoint->media.rtp.engine,
+				session->endpoint->media.rtp.port_start,
+				session->endpoint->media.rtp.port_end);
+			return -1;
+		}
+	} else {
+		if (!(session_media->rtp = ast_rtp_instance_new(session->endpoint->media.rtp.engine, sched, media_address, NULL))) {
+			ast_log(LOG_ERROR, "Unable to create RTP instance using RTP engine '%s'\n", session->endpoint->media.rtp.engine);
+			return -1;
+		}
 	}
 
 	ast_rtp_instance_set_prop(session_media->rtp, AST_RTP_PROPERTY_NAT, session->endpoint->media.rtp.symmetric);
@@ -344,6 +360,14 @@ static void get_codecs(struct ast_sip_session *session, const struct pjmedia_sdp
 
 		ast_copy_pj_str(name, &rtpmap->enc_name, sizeof(name));
 		if (strcmp(name, "telephone-event") == 0) {
+			if (tel_event == 0) {
+				int dtmf_rate = 0, dtmf_code = 0;
+				char dtmf_pt[8];
+				ast_copy_pj_str(dtmf_pt, &rtpmap->pt, sizeof(dtmf_pt));
+				dtmf_code = atoi(dtmf_pt);
+				dtmf_rate = rtpmap->clock_rate;
+				ast_rtp_codecs_set_preferred_dtmf_format(codecs, dtmf_code, dtmf_rate);
+			}
 			tel_event++;
 		}
 
@@ -544,7 +568,10 @@ static int set_caps(struct ast_sip_session *session,
 			ast_format_cap_get_names(caps, &usbuf),
 			ast_format_cap_get_names(peer, &thembuf));
 	} else {
-		ast_rtp_codecs_set_preferred_format(&codecs, ast_format_cap_get_format(joint, 0));
+		struct ast_format *preferred_fmt = ast_format_cap_get_format(joint, 0);
+
+		ast_rtp_codecs_set_preferred_format(&codecs, preferred_fmt);
+		ao2_ref(preferred_fmt, -1);
 	}
 
 	if (is_offer) {
@@ -2310,14 +2337,18 @@ static int apply_negotiated_sdp_stream(struct ast_sip_session *session,
 	if (session_media->remotely_held_changed) {
 		if (session_media->remotely_held) {
 			/* The remote side has put us on hold */
-			ast_queue_hold(session->channel, session->endpoint->mohsuggest);
-			ast_rtp_instance_stop(session_media->rtp);
-			ast_queue_frame(session->channel, &ast_null_frame);
+			if (!session->endpoint->suppress_moh_on_sendonly) {
+				ast_queue_hold(session->channel, session->endpoint->mohsuggest);
+				ast_rtp_instance_stop(session_media->rtp);
+				ast_queue_frame(session->channel, &ast_null_frame);
+			}
 			session_media->remotely_held_changed = 0;
 		} else {
 			/* The remote side has taken us off hold */
-			ast_queue_unhold(session->channel);
-			ast_queue_frame(session->channel, &ast_null_frame);
+			if (!session->endpoint->suppress_moh_on_sendonly) {
+				ast_queue_unhold(session->channel);
+				ast_queue_frame(session->channel, &ast_null_frame);
+			}
 			session_media->remotely_held_changed = 0;
 		}
 	} else if ((pjmedia_sdp_neg_was_answer_remote(session->inv_session->neg) == PJ_FALSE)

@@ -39,6 +39,7 @@
 #include "asterisk/mod_format.h"
 #include "asterisk/cli.h"
 #include "asterisk/channel.h"
+#include "asterisk/cel.h"
 #include "asterisk/sched.h"
 #include "asterisk/translate.h"
 #include "asterisk/utils.h"
@@ -221,15 +222,25 @@ int ast_file_fdtemp(const char *path, char **filename, const char *template_name
 
 int ast_stopstream(struct ast_channel *tmp)
 {
+	struct ast_json * cel_event = NULL;
+
 	ast_channel_lock(tmp);
 
 	/* Stop a running stream if there is one */
 	if (ast_channel_stream(tmp)) {
 		ast_closestream(ast_channel_stream(tmp));
 		ast_channel_stream_set(tmp, NULL);
+
+		cel_event = ast_json_pack("{ s: s }", "event", "FILE_STREAM_END");
+		if (cel_event) {
+			ast_cel_publish_event(tmp, AST_CEL_STREAM_END, cel_event);
+		}
+
 		if (ast_channel_oldwriteformat(tmp) && ast_set_write_format(tmp, ast_channel_oldwriteformat(tmp)))
 			ast_log(LOG_WARNING, "Unable to restore format back to %s\n", ast_format_get_name(ast_channel_oldwriteformat(tmp)));
 	}
+	ast_json_unref(cel_event);
+
 	/* Stop the video stream too */
 	if (ast_channel_vstream(tmp) != NULL) {
 		ast_closestream(ast_channel_vstream(tmp));
@@ -289,7 +300,7 @@ int ast_writestream(struct ast_filestream *fs, struct ast_frame *f)
 
 				/* the translator may have returned multiple frames, so process them */
 				for (cur = trf; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
-					if ((res = fs->fmt->write(fs, trf))) {
+					if ((res = fs->fmt->write(fs, cur))) {
 						ast_log(LOG_WARNING, "Translated frame write failed\n");
 						break;
 					}
@@ -729,7 +740,7 @@ static int fileexists_test(const char *filename, const char *fmt, const char *la
  *
  * \param filename Name of the file.
  * \param fmt Format to look for the file in. OPTIONAL
- * \param preflang The perfered language
+ * \param preflang The preferred language
  * \param buf Returns the matching filename
  * \param buflen Size of the buf
  * \param result_cap OPTIONAL format capabilities result structure
@@ -787,13 +798,8 @@ static int fileexists_core(const char *filename, const char *fmt, const char *pr
 	return 0;
 }
 
-struct ast_filestream *ast_openstream(struct ast_channel *chan, const char *filename, const char *preflang)
-{
-	return ast_openstream_full(chan, filename, preflang, 0);
-}
-
-struct ast_filestream *ast_openstream_full(struct ast_channel *chan,
-	const char *filename, const char *preflang, int asis)
+static struct ast_filestream *openstream_internal(struct ast_channel *chan,
+	const char *filename, const char *preflang, int asis, int quiet)
 {
 	/*
 	 * Use fileexists_core() to find a file in a compatible
@@ -822,7 +828,9 @@ struct ast_filestream *ast_openstream_full(struct ast_channel *chan,
 	if (!fileexists_core(filename, NULL, preflang, buf, buflen, file_fmt_cap) ||
 		!ast_format_cap_has_type(file_fmt_cap, AST_MEDIA_TYPE_AUDIO)) {
 
-		ast_log(LOG_WARNING, "File %s does not exist in any format\n", filename);
+		if (!quiet) {
+			ast_log(LOG_WARNING, "File %s does not exist in any format\n", filename);
+		}
 		ao2_ref(file_fmt_cap, -1);
 		return NULL;
 	}
@@ -843,6 +851,17 @@ struct ast_filestream *ast_openstream_full(struct ast_channel *chan,
 	if (res >= 0)
 		return ast_channel_stream(chan);
 	return NULL;
+}
+
+struct ast_filestream *ast_openstream(struct ast_channel *chan, const char *filename, const char *preflang)
+{
+	return openstream_internal(chan, filename, preflang, 0, 0);
+}
+
+struct ast_filestream *ast_openstream_full(struct ast_channel *chan,
+	const char *filename, const char *preflang, int asis)
+{
+	return openstream_internal(chan, filename, preflang, asis, 0);
 }
 
 struct ast_filestream *ast_openvstream(struct ast_channel *chan,
@@ -1293,6 +1312,7 @@ int ast_file_read_dirs(const char *dir_name, ast_file_on_file on_file, void *obj
 int ast_streamfile(struct ast_channel *chan, const char *filename,
 	const char *preflang)
 {
+	struct ast_json * cel_event = NULL;
 	struct ast_filestream *fs = NULL;
 	struct ast_filestream *vfs = NULL;
 	off_t pos;
@@ -1307,7 +1327,7 @@ int ast_streamfile(struct ast_channel *chan, const char *filename,
 	if (ast_opt_sounds_search_custom && !is_absolute_path(filename)) {
 		memset(custom_filename, 0, sizeof(custom_filename));
 		snprintf(custom_filename, sizeof(custom_filename), "custom/%s", filename);
-		fs = ast_openstream(chan, custom_filename, preflang);
+		fs = openstream_internal(chan, custom_filename, preflang, 0, 1); /* open stream, do not warn for missing files */
 		if (fs) {
 			tmp_filename = custom_filename;
 			ast_debug(3, "Found file %s in custom directory\n", filename);
@@ -1358,6 +1378,20 @@ int ast_streamfile(struct ast_channel *chan, const char *filename,
 	res = ast_playstream(fs);
 	if (!res && vfs)
 		res = ast_playstream(vfs);
+
+	cel_event = ast_json_pack("{ s: s, s: {s: s, s: s, s: s}}",
+		"event", "FILE_STREAM_BEGIN",
+		"extra",
+			"sound", tmp_filename,
+			"format", ast_format_get_name(ast_channel_writeformat(chan)),
+			"language", preflang ? preflang : "default"
+	);
+	if (cel_event) {
+		ast_cel_publish_event(chan, AST_CEL_STREAM_BEGIN, cel_event);
+	} else {
+		ast_log(LOG_WARNING, "Unable to build extradata for sound file STREAM_BEGIN event on channel %s", ast_channel_name(chan));
+	}
+	ast_json_unref(cel_event);
 
 	if (VERBOSITY_ATLEAST(3)) {
 		ast_channel_lock(chan);

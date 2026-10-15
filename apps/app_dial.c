@@ -70,6 +70,9 @@
 
 /*** DOCUMENTATION
 	<application name="Dial" language="en_US">
+		<since>
+			<version>0.1.0</version>
+		</since>
 		<synopsis>
 			Attempt to connect to another device or endpoint and bridge the call.
 		</synopsis>
@@ -94,6 +97,7 @@
 				<para>If a second argument is specified, this controls the number of seconds we attempt to dial the specified devices
 				without receiving early media or ringing. If neither progress, ringing, nor voice frames have been received when this
 				timeout expires, the call will be treated as a CHANUNAVAIL. This can be used to skip destinations that may not be responsive.</para>
+				<para>The timeouts need not be whole numbers; both arguments accept fractional seconds.</para>
 			</parameter>
 			<parameter name="options" required="false">
 				<optionlist>
@@ -211,7 +215,7 @@
 					and <emphasis>start</emphasis> execution at that location.</para>
 					<para>NOTE: Any channel variables you want the called channel to inherit from the caller channel must be
 					prefixed with one or two underbars ('_').</para>
-					<para>NOTE: Using this option from a GoSub() might not make sense as there would be no return points.</para>
+					<para>NOTE: Using this option from a Gosub() might not make sense as there would be no return points.</para>
 				</option>
 				<option name="g">
 					<para>Proceed with dialplan execution at the next priority in the current extension if the
@@ -584,7 +588,7 @@
 						nonexistent location, e.g. nonexistent DNS hostname.
 					</value>
 					<value name="CONGESTION">
-						Channel or switching congestion occured when routing the call.
+						Channel or switching congestion occurred when routing the call.
 						This can occur if there is a slow or no response from the remote end.
 					</value>
 					<value name="NOANSWER">
@@ -624,6 +628,9 @@
 		</see-also>
 	</application>
 	<application name="RetryDial" language="en_US">
+		<since>
+			<version>1.2.0</version>
+		</since>
 		<synopsis>
 			Place a call, retrying on failure allowing an optional exit extension.
 		</synopsis>
@@ -944,7 +951,7 @@ static void do_forward(struct chanlist *o, struct cause_args *num,
 	struct ast_channel *c = o->chan; /* the winner */
 	struct ast_channel *in = num->chan; /* the input channel */
 	char *stuff;
-	char *tech;
+	const char *tech;
 	int cause;
 	struct ast_party_caller caller;
 
@@ -1214,7 +1221,6 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 	struct cause_args num = *num_in;
 	int prestart = num.busy + num.congestion + num.nochan;
 	int orig_answer_to = *to_answer;
-	int progress_to_dup = *to_progress;
 	int orig_progress_to = *to_progress;
 	struct ast_channel *peer = NULL;
 	struct chanlist *outgoing = AST_LIST_FIRST(out_chans);
@@ -1259,7 +1265,7 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 
 	is_cc_recall = ast_cc_is_recall(in, &cc_recall_core_id, NULL);
 
-	while ((*to_answer = ast_remaining_ms(start, orig_answer_to)) && (*to_progress = ast_remaining_ms(start, progress_to_dup)) && !peer) {
+	while ((*to_answer = ast_remaining_ms(start, orig_answer_to)) && (*to_progress = ast_remaining_ms(start, orig_progress_to)) && !peer) {
 		struct chanlist *o;
 		int pos = 0; /* how many channels do we handle */
 		int numlines = prestart;
@@ -1285,13 +1291,16 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 			} else {
 				ast_verb(3, "No one is available to answer at this time (%d:%d/%d/%d)\n", numlines, num.busy, num.congestion, num.nochan);
 			}
-			*to_answer = 0;
+			*to_answer = 0; /* Continue in the dialplan, since nobody answered */
 			if (is_cc_recall) {
 				ast_cc_failed(cc_recall_core_id, "Everyone is busy/congested for the recall. How sad");
 			}
 			SCOPE_EXIT_RTN_VALUE(NULL, "%s: No outgoing channels available\n", ast_channel_name(in));
 		}
-		winner = ast_waitfor_n(watchers, pos, to_answer);
+
+		/* If progress timeout is active, use that if it's the shorter of the 2 timeouts. */
+		winner = ast_waitfor_n(watchers, pos, *to_progress > 0 && (*to_answer < 0 || *to_progress < *to_answer) ? to_progress : to_answer);
+
 		AST_LIST_TRAVERSE(out_chans, o, node) {
 			int res = 0;
 			struct ast_frame *f;
@@ -1506,7 +1515,7 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 					 */
 					++num_ringing;
 					*to_progress = -1;
-					progress_to_dup = -1;
+					orig_progress_to = -1;
 					if (ignore_cc || cc_frame_received || num_ringing == numlines) {
 						ast_verb(3, "%s is ringing\n", ast_channel_name(c));
 						/* Setup early media if appropriate */
@@ -1551,7 +1560,7 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 						}
 					}
 					*to_progress = -1;
-					progress_to_dup = -1;
+					orig_progress_to = -1;
 					if (!sent_progress) {
 						struct timeval now, then;
 						int64_t diff;
@@ -1594,6 +1603,17 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 						}
 						if (res) {
 							ast_log(LOG_WARNING, "Called channel %s hung up post-progress before all digits could be sent\n", ast_channel_name(c));
+							if (ast_channel_state(c) == AST_STATE_UP) {
+								/* The called channel answered while we were sending it digits, so the answer never got processed by app_dial.
+								 * The channel is dying now, but better to answer late than never? */
+								ast_debug(1, "Channel %s answered while we were sending it digits, answering %s retroactively\n", ast_channel_name(c), ast_channel_name(in));
+								/* Indicate answer supervision to the caller before we exit.
+								 * We're not going to bridge, but this way at least the CDRs are correct, etc. */
+								ast_raw_answer(in);
+								strcpy(pa->status, "ANSWER");
+							} else {
+								*to_answer = 0; /* Continue in the dialplan, since nobody answered */
+							}
 							goto wait_over;
 						}
 					}
@@ -1621,6 +1641,14 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 						}
 						if (res) {
 							ast_log(LOG_WARNING, "Called channel %s hung up post-wink before all digits could be sent\n", ast_channel_name(c));
+							if (ast_channel_state(c) == AST_STATE_UP) {
+								/* Same as in AST_CONTROL_PROGRESS */
+								ast_debug(1, "Channel %s answered while we were sending it digits, answering %s retroactively\n", ast_channel_name(c), ast_channel_name(in));
+								ast_raw_answer(in);
+								strcpy(pa->status, "ANSWER");
+							} else {
+								*to_answer = 0; /* Continue in the dialplan, since nobody answered */
+							}
 							goto wait_over;
 						}
 					}
@@ -1720,6 +1748,15 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 				case AST_CONTROL_PVT_CAUSE_CODE:
 					ast_indicate_data(in, AST_CONTROL_PVT_CAUSE_CODE, f->data.ptr, f->datalen);
 					break;
+				case AST_CONTROL_PLAYBACK_BEGIN:
+					if (!f->data.ptr) {
+						ast_log(LOG_WARNING, "Got playback begin directive without filename on %s\n", ast_channel_name(c));
+					} else {
+						const char *filename = f->data.ptr;
+						ast_verb(3, "Playing audio file %s on %s\n", filename, ast_channel_name(in));
+						ast_streamfile(in, filename, ast_channel_language(in));
+					}
+					break;
 				case -1:
 					if (single && !caller_entertained) {
 						ast_verb(3, "%s stopped sounds\n", ast_channel_name(c));
@@ -1728,7 +1765,7 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 					}
 					break;
 				default:
-					ast_debug(1, "Dunno what to do with control type %d\n", f->subclass.integer);
+					ast_debug(1, "Dunno what to do with control type %d on %s\n", f->subclass.integer, ast_channel_name(in));
 					break;
 				}
 				break;
@@ -1741,18 +1778,18 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 					break;
 				}
 				*to_progress = -1;
-				progress_to_dup = -1;
+				orig_progress_to = -1;
 				/* Fall through */
 			case AST_FRAME_TEXT:
 				if (single && ast_write(in, f)) {
-					ast_log(LOG_WARNING, "Unable to write frametype: %u\n",
-						f->frametype);
+					ast_log(LOG_WARNING, "Unable to write frametype %u on %s\n",
+						f->frametype, ast_channel_name(in));
 				}
 				break;
 			case AST_FRAME_HTML:
 				if (single && !ast_test_flag64(outgoing, DIAL_NOFORWARDHTML)
 					&& ast_channel_sendhtml(in, f->subclass.integer, f->data.ptr, f->datalen) == -1) {
-					ast_log(LOG_WARNING, "Unable to send URL\n");
+					ast_log(LOG_WARNING, "Unable to send URL on %s\n", ast_channel_name(in));
 				}
 				break;
 			default:
@@ -1762,12 +1799,6 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 		} /* end for */
 		if (winner == in) {
 			struct ast_frame *f = ast_read(in);
-#if 0
-			if (f && (f->frametype != AST_FRAME_VOICE))
-				printf("Frame type: %d, %d\n", f->frametype, f->subclass);
-			else if (!f || (f->frametype != AST_FRAME_VOICE))
-				printf("Hangup received on %s\n", in->name);
-#endif
 			if (!f || ((f->frametype == AST_FRAME_CONTROL) && (f->subclass.integer == AST_CONTROL_HANGUP))) {
 				/* Got hung up */
 				*to_answer = -1;
@@ -1791,7 +1822,10 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 				if (ast_test_flag64(peerflags, OPT_DTMF_EXIT)) {
 					const char *context;
 					ast_channel_lock(in);
-					context = pbx_builtin_getvar_helper(in, "EXITCONTEXT");
+					if ((context = pbx_builtin_getvar_helper(in, "EXITCONTEXT"))) {
+						context = ast_strdupa(context);
+					}
+					ast_channel_unlock(in);
 					if (onedigit_goto(in, context, (char) f->subclass.integer, 1)) {
 						ast_verb(3, "User hit %c to disconnect call.\n", f->subclass.integer);
 						*to_answer = 0;
@@ -1800,14 +1834,12 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 						pa->canceled = 1;
 						publish_dial_end_event(in, out_chans, NULL, pa->status);
 						ast_frfree(f);
-						ast_channel_unlock(in);
 						if (is_cc_recall) {
 							ast_cc_completed(in, "CC completed, but the caller used DTMF to exit");
 						}
 						SCOPE_EXIT_RTN_VALUE(NULL, "%s: Caller pressed %c to end call\n",
 							ast_channel_name(in), f->subclass.integer);
 					}
-					ast_channel_unlock(in);
 				}
 
 				if (ast_test_flag64(peerflags, OPT_CALLER_HANGUP) &&
@@ -1837,7 +1869,7 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 					/* Forward HTML stuff */
 					if (!ast_test_flag64(o, DIAL_NOFORWARDHTML)
 						&& ast_channel_sendhtml(o->chan, f->subclass.integer, f->data.ptr, f->datalen) == -1) {
-						ast_log(LOG_WARNING, "Unable to send URL\n");
+						ast_log(LOG_WARNING, "Unable to send URL on %s\n", ast_channel_name(o->chan));
 					}
 					break;
 				case AST_FRAME_VIDEO:
@@ -1856,8 +1888,8 @@ static struct ast_channel *wait_for_answer(struct ast_channel *in,
 				case AST_FRAME_DTMF_BEGIN:
 				case AST_FRAME_DTMF_END:
 					if (ast_write(o->chan, f)) {
-						ast_log(LOG_WARNING, "Unable to forward frametype: %u\n",
-							f->frametype);
+						ast_log(LOG_WARNING, "Unable to forward frametype %u on %s\n",
+							f->frametype, ast_channel_name(o->chan));
 					}
 					break;
 				case AST_FRAME_CONTROL:
@@ -1924,7 +1956,11 @@ skip_frame:;
 
 wait_over:
 	if (!*to_answer || ast_check_hangup(in)) {
-		ast_verb(3, "Nobody picked up in %d ms\n", orig_answer_to);
+		if (orig_answer_to != -1) {
+			ast_verb(3, "Nobody picked up in %d ms\n", orig_answer_to);
+		} else {
+			ast_verb(3, "Call terminated without answer\n");
+		}
 		publish_dial_end_event(in, out_chans, NULL, "NOANSWER");
 	} else if (!*to_progress) {
 		ast_verb(3, "No early media received in %d ms\n", orig_progress_to);
@@ -2916,22 +2952,23 @@ static int dial_exec_full(struct ast_channel *chan, const char *data, struct ast
 		to_answer = -1;
 		to_progress = -1;
 	} else {
+		double tmp;
 		char *anstimeout = strsep(&args.timeout, "^");
 		if (!ast_strlen_zero(anstimeout)) {
-			to_answer = atoi(anstimeout);
-			if (to_answer > 0) {
-				to_answer *= 1000;
+			if (sscanf(anstimeout, "%30lf", &tmp) == 1 && tmp > 0) {
+				to_answer = tmp * 1000;
+				ast_debug(3, "Dial timeout set to %d ms\n", to_answer);
 			} else {
-				ast_log(LOG_WARNING, "Invalid answer timeout specified: '%s'. Setting timeout to infinite\n", args.timeout);
+				ast_log(LOG_WARNING, "Invalid answer timeout specified: '%s'. Setting timeout to infinite\n", anstimeout);
 				to_answer = -1;
 			}
 		} else {
 			to_answer = -1;
 		}
 		if (!ast_strlen_zero(args.timeout)) {
-			to_progress = atoi(args.timeout);
-			if (to_progress > 0) {
-				to_progress *= 1000;
+			if (sscanf(args.timeout, "%30lf", &tmp) == 1 && tmp > 0) {
+				to_progress = tmp * 1000;
+				ast_debug(3, "Dial progress timeout set to %d ms\n", to_progress);
 			} else {
 				ast_log(LOG_WARNING, "Invalid progress timeout specified: '%s'. Setting timeout to infinite\n", args.timeout);
 				to_progress = -1;
@@ -2984,8 +3021,10 @@ static int dial_exec_full(struct ast_channel *chan, const char *data, struct ast
 
 	if (!peer) {
 		if (result) {
-			res = result;
+			res = result; /* User entered a DTMF digit that matched a context */
 		} else if (to_answer) { /* Musta gotten hung up */
+			/* This does not necessarily mean that we dialed without a timeout.
+			 * to_answer is (ab)used by wait_for_answer to to indicate whether or we should continue in the dialplan or exit. */
 			res = -1;
 		} else { /* Nobody answered, next please? */
 			res = 0;
@@ -3595,5 +3634,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Dialing Application",
 	.support_level = AST_MODULE_SUPPORT_CORE,
 	.load = load_module,
 	.unload = unload_module,
-	.requires = "ccss",
 );

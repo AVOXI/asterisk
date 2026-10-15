@@ -214,8 +214,10 @@ void *ast_taskprocessor_unreference(struct ast_taskprocessor *tps);
  * \retval -1 failure
  * \since 1.6.1
  */
-int ast_taskprocessor_push(struct ast_taskprocessor *tps, int (*task_exe)(void *datap), void *datap)
-	attribute_warn_unused_result;
+int __ast_taskprocessor_push(struct ast_taskprocessor *tps, int (*task_exe)(void *datap), void *datap,
+	const char *file, int line, const char *function) attribute_warn_unused_result;
+#define ast_taskprocessor_push(tps, task_exe, datap) \
+	__ast_taskprocessor_push(tps, task_exe, datap, __FILE__, __LINE__, __PRETTY_FUNCTION__)
 
 /*! \brief Local data parameter */
 struct ast_taskprocessor_local {
@@ -240,9 +242,11 @@ struct ast_taskprocessor_local {
  * \retval -1 failure
  * \since 12.0.0
  */
-int ast_taskprocessor_push_local(struct ast_taskprocessor *tps,
-	int (*task_exe)(struct ast_taskprocessor_local *local), void *datap)
-	attribute_warn_unused_result;
+int __ast_taskprocessor_push_local(struct ast_taskprocessor *tps,
+	int (*task_exe)(struct ast_taskprocessor_local *local), void *datap,
+	const char *file, int line, const char *function) attribute_warn_unused_result;
+#define ast_taskprocessor_push_local(tps, task_exe, datap) \
+	__ast_taskprocessor_push_local(tps, task_exe, datap, __FILE__, __LINE__, __PRETTY_FUNCTION__)
 
 /*!
  * \brief Indicate the taskprocessor is suspended.
@@ -339,6 +343,11 @@ const char *ast_taskprocessor_name(struct ast_taskprocessor *tps);
  * \since 13.7.0
  */
 long ast_taskprocessor_size(struct ast_taskprocessor *tps);
+
+/*!
+ * \brief Return the listener associated with the taskprocessor
+ */
+struct ast_taskprocessor_listener *ast_taskprocessor_listener(struct ast_taskprocessor *tps);
 
 /*!
  * \brief Get the current taskprocessor high water alert count.

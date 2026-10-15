@@ -674,22 +674,20 @@ int ast_channel_trylock(struct ast_channel *chan);
 struct ast_flags {  /* stolen from utils.h */
 	unsigned int flags;
 };
-#define ast_test_flag(p,flag) 		({ \
-					typeof ((p)->flags) __p = (p)->flags; \
-					unsigned int __x = 0; \
-					(void) (&__p == &__x); \
-					((p)->flags & (flag)); \
-					})
+#if __BYTE_ORDER == __BIG_ENDIAN
+#define SWAP64_32(flags) (((uint64_t)flags << 32) | ((uint64_t)flags >> 32))
+#else
+#define SWAP64_32(flags) (flags)
+#endif
 
-#define ast_set2_flag(p,value,flag)	do { \
+extern uint64_t __unsigned_int_flags_dummy64;
+
+#define ast_test_flag64(p,flag) 		({ \
 					typeof ((p)->flags) __p = (p)->flags; \
-					unsigned int __x = 0; \
-					(void) (&__p == &__x); \
-					if (value) \
-						(p)->flags |= (flag); \
-					else \
-						(p)->flags &= ~(flag); \
-					} while (0)
+					typeof (__unsigned_int_flags_dummy64) __x = 0; \
+					(void) (&__p == (typeof(__p)*)&__x); \
+					((p)->flags & SWAP64_32(flag)); \
+					})
 
 /* from config.c */
 
@@ -1363,27 +1361,27 @@ enum ast_option_flags {
 
 struct ast_flags ast_options = { AST_DEFAULT_OPTIONS };
 
-#define ast_opt_exec_includes		ast_test_flag(&ast_options, AST_OPT_FLAG_EXEC_INCLUDES)
-#define ast_opt_no_fork			ast_test_flag(&ast_options, AST_OPT_FLAG_NO_FORK)
-#define ast_opt_quiet			ast_test_flag(&ast_options, AST_OPT_FLAG_QUIET)
-#define ast_opt_console			ast_test_flag(&ast_options, AST_OPT_FLAG_CONSOLE)
-#define ast_opt_high_priority		ast_test_flag(&ast_options, AST_OPT_FLAG_HIGH_PRIORITY)
-#define ast_opt_init_keys		ast_test_flag(&ast_options, AST_OPT_FLAG_INIT_KEYS)
-#define ast_opt_remote			ast_test_flag(&ast_options, AST_OPT_FLAG_REMOTE)
-#define ast_opt_exec			ast_test_flag(&ast_options, AST_OPT_FLAG_EXEC)
-#define ast_opt_no_color		ast_test_flag(&ast_options, AST_OPT_FLAG_NO_COLOR)
-#define ast_fully_booted		ast_test_flag(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)
-#define ast_opt_transcode_via_slin	ast_test_flag(&ast_options, AST_OPT_FLAG_TRANSCODE_VIA_SLIN)
-#define ast_opt_priority_jumping	ast_test_flag(&ast_options, AST_OPT_FLAG_PRIORITY_JUMPING)
-#define ast_opt_dump_core		ast_test_flag(&ast_options, AST_OPT_FLAG_DUMP_CORE)
-#define ast_opt_cache_record_files	ast_test_flag(&ast_options, AST_OPT_FLAG_CACHE_RECORD_FILES)
-#define ast_opt_timestamp		ast_test_flag(&ast_options, AST_OPT_FLAG_TIMESTAMP)
-#define ast_opt_override_config		ast_test_flag(&ast_options, AST_OPT_FLAG_OVERRIDE_CONFIG)
-#define ast_opt_reconnect		ast_test_flag(&ast_options, AST_OPT_FLAG_RECONNECT)
-#define ast_opt_transmit_silence	ast_test_flag(&ast_options, AST_OPT_FLAG_TRANSMIT_SILENCE)
-#define ast_opt_dont_warn		ast_test_flag(&ast_options, AST_OPT_FLAG_DONT_WARN)
-#define ast_opt_always_fork		ast_test_flag(&ast_options, AST_OPT_FLAG_ALWAYS_FORK)
-#define ast_opt_mute			ast_test_flag(&ast_options, AST_OPT_FLAG_MUTE)
+#define ast_opt_exec_includes		ast_test_flag64(&ast_options, AST_OPT_FLAG_EXEC_INCLUDES)
+#define ast_opt_no_fork			ast_test_flag64(&ast_options, AST_OPT_FLAG_NO_FORK)
+#define ast_opt_quiet			ast_test_flag64(&ast_options, AST_OPT_FLAG_QUIET)
+#define ast_opt_console			ast_test_flag64(&ast_options, AST_OPT_FLAG_CONSOLE)
+#define ast_opt_high_priority		ast_test_flag64(&ast_options, AST_OPT_FLAG_HIGH_PRIORITY)
+#define ast_opt_init_keys		ast_test_flag64(&ast_options, AST_OPT_FLAG_INIT_KEYS)
+#define ast_opt_remote			ast_test_flag64(&ast_options, AST_OPT_FLAG_REMOTE)
+#define ast_opt_exec			ast_test_flag64(&ast_options, AST_OPT_FLAG_EXEC)
+#define ast_opt_no_color		ast_test_flag64(&ast_options, AST_OPT_FLAG_NO_COLOR)
+#define ast_fully_booted		ast_test_flag64(&ast_options, AST_OPT_FLAG_FULLY_BOOTED)
+#define ast_opt_transcode_via_slin	ast_test_flag64(&ast_options, AST_OPT_FLAG_TRANSCODE_VIA_SLIN)
+#define ast_opt_priority_jumping	ast_test_flag64(&ast_options, AST_OPT_FLAG_PRIORITY_JUMPING)
+#define ast_opt_dump_core		ast_test_flag64(&ast_options, AST_OPT_FLAG_DUMP_CORE)
+#define ast_opt_cache_record_files	ast_test_flag64(&ast_options, AST_OPT_FLAG_CACHE_RECORD_FILES)
+#define ast_opt_timestamp		ast_test_flag64(&ast_options, AST_OPT_FLAG_TIMESTAMP)
+#define ast_opt_override_config		ast_test_flag64(&ast_options, AST_OPT_FLAG_OVERRIDE_CONFIG)
+#define ast_opt_reconnect		ast_test_flag64(&ast_options, AST_OPT_FLAG_RECONNECT)
+#define ast_opt_transmit_silence	ast_test_flag64(&ast_options, AST_OPT_FLAG_TRANSMIT_SILENCE)
+#define ast_opt_dont_warn		ast_test_flag64(&ast_options, AST_OPT_FLAG_DONT_WARN)
+#define ast_opt_always_fork		ast_test_flag64(&ast_options, AST_OPT_FLAG_ALWAYS_FORK)
+#define ast_opt_mute			ast_test_flag64(&ast_options, AST_OPT_FLAG_MUTE)
 
 extern int option_verbose;
 extern int option_debug;		/*!< Debugging */
@@ -5163,7 +5161,7 @@ static void pbx_substitute_variables_helper_full(struct ast_channel *c, struct v
 		pos = strlen(whereweare);
 		nextvar = NULL;
 		nextexp = NULL;
-		nextthing = strchr(whereweare, '$');
+		nextthing = (char *)strchr(whereweare, '$');
 		if (nextthing) {
 			switch (nextthing[1]) {
 			case '{':

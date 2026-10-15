@@ -39,6 +39,9 @@
 
 /*** DOCUMENTATION
 	<manager name="PJSIPNotify" language="en_US">
+		<since>
+			<version>12.0.0</version>
+		</since>
 		<synopsis>
 			Send a NOTIFY to either an endpoint, an arbitrary URI, or inside a SIP dialog.
 		</synopsis>
@@ -83,6 +86,9 @@
 				<synopsis>Unused, but reserved.</synopsis>
 			</configObject>
 			<configObject name="notify">
+				<since>
+					<version>12.0.0</version>
+				</since>
 				<synopsis>Configuration of a NOTIFY request.</synopsis>
 				<description>
 					<para>Each key-value pair in a <literal>notify</literal>
@@ -575,7 +581,7 @@ static void build_notify_body(pjsip_tx_data *tdata, struct ast_str *content_type
 		}
 
 		body.type = ast_str_buffer(content_type);
-		if ((p = strchr(body.type, '/'))) {
+		if ((p = strchr((char *)body.type, '/'))) {
 			*p++ = '\0';
 			body.subtype = p;
 		}

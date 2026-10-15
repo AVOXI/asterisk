@@ -608,8 +608,7 @@ static int queued_task_pushed(void *data)
  * \param listener The taskprocessor listener. The threadpool is the listener's private data
  * \param was_empty True if the taskprocessor was empty prior to the task being pushed
  */
-static void threadpool_tps_task_pushed(struct ast_taskprocessor_listener *listener,
-		int was_empty)
+static void threadpool_tps_task_pushed(struct ast_taskprocessor_listener *listener, int was_empty)
 {
 	struct ast_threadpool *pool = ast_taskprocessor_listener_get_user_data(listener);
 	struct task_pushed_data *tpd;
@@ -954,13 +953,25 @@ struct ast_threadpool *ast_threadpool_create(const char *name,
 	return pool;
 }
 
-int ast_threadpool_push(struct ast_threadpool *pool, int (*task)(void *data), void *data)
+#undef ast_threadpool_push
+#define ast_threadpool_push_internal(pool, task, data) \
+	__ast_threadpool_push(pool, task, data, __FILE__, __LINE__, __PRETTY_FUNCTION__)
+int ast_threadpool_push(struct ast_threadpool *pool, int (*task)(void *data), void *data);
+
+int __ast_threadpool_push(struct ast_threadpool *pool, int (*task)(void *data), void *data,
+	const char *file, int line, const char *function)
 {
 	SCOPED_AO2LOCK(lock, pool);
 	if (!pool->shutting_down) {
-		return ast_taskprocessor_push(pool->tps, task, data);
+		return __ast_taskprocessor_push(pool->tps, task, data, file, line, function);
 	}
 	return -1;
+}
+
+/* ABI compatibility: Provide actual function symbol for external modules */
+int ast_threadpool_push(struct ast_threadpool *pool, int (*task)(void *data), void *data)
+{
+	return __ast_threadpool_push(pool, task, data, NULL, 0, NULL);
 }
 
 void ast_threadpool_shutdown(struct ast_threadpool *pool)
@@ -1211,103 +1222,6 @@ static int worker_set_state(struct worker_thread *worker, enum worker_state stat
 	return 0;
 }
 
-/*! Serializer group shutdown control object. */
-struct ast_serializer_shutdown_group {
-	/*! Shutdown thread waits on this conditional. */
-	ast_cond_t cond;
-	/*! Count of serializers needing to shutdown. */
-	int count;
-};
-
-static void serializer_shutdown_group_dtor(void *vdoomed)
-{
-	struct ast_serializer_shutdown_group *doomed = vdoomed;
-
-	ast_cond_destroy(&doomed->cond);
-}
-
-struct ast_serializer_shutdown_group *ast_serializer_shutdown_group_alloc(void)
-{
-	struct ast_serializer_shutdown_group *shutdown_group;
-
-	shutdown_group = ao2_alloc(sizeof(*shutdown_group), serializer_shutdown_group_dtor);
-	if (!shutdown_group) {
-		return NULL;
-	}
-	ast_cond_init(&shutdown_group->cond, NULL);
-	return shutdown_group;
-}
-
-int ast_serializer_shutdown_group_join(struct ast_serializer_shutdown_group *shutdown_group, int timeout)
-{
-	int remaining;
-	ast_mutex_t *lock;
-
-	if (!shutdown_group) {
-		return 0;
-	}
-
-	lock = ao2_object_get_lockaddr(shutdown_group);
-	ast_assert(lock != NULL);
-
-	ao2_lock(shutdown_group);
-	if (timeout) {
-		struct timeval start;
-		struct timespec end;
-
-		start = ast_tvnow();
-		end.tv_sec = start.tv_sec + timeout;
-		end.tv_nsec = start.tv_usec * 1000;
-		while (shutdown_group->count) {
-			if (ast_cond_timedwait(&shutdown_group->cond, lock, &end)) {
-				/* Error or timed out waiting for the count to reach zero. */
-				break;
-			}
-		}
-	} else {
-		while (shutdown_group->count) {
-			if (ast_cond_wait(&shutdown_group->cond, lock)) {
-				/* Error */
-				break;
-			}
-		}
-	}
-	remaining = shutdown_group->count;
-	ao2_unlock(shutdown_group);
-	return remaining;
-}
-
-/*!
- * \internal
- * \brief Increment the number of serializer members in the group.
- * \since 13.5.0
- *
- * \param shutdown_group Group shutdown controller.
- */
-static void serializer_shutdown_group_inc(struct ast_serializer_shutdown_group *shutdown_group)
-{
-	ao2_lock(shutdown_group);
-	++shutdown_group->count;
-	ao2_unlock(shutdown_group);
-}
-
-/*!
- * \internal
- * \brief Decrement the number of serializer members in the group.
- * \since 13.5.0
- *
- * \param shutdown_group Group shutdown controller.
- */
-static void serializer_shutdown_group_dec(struct ast_serializer_shutdown_group *shutdown_group)
-{
-	ao2_lock(shutdown_group);
-	--shutdown_group->count;
-	if (!shutdown_group->count) {
-		ast_cond_signal(&shutdown_group->cond);
-	}
-	ao2_unlock(shutdown_group);
-}
-
 struct serializer {
 	/*! Threadpool the serializer will use to process the jobs. */
 	struct ast_threadpool *pool;
@@ -1379,7 +1293,7 @@ static void serializer_shutdown(struct ast_taskprocessor_listener *listener)
 	struct serializer *ser = ast_taskprocessor_listener_get_user_data(listener);
 
 	if (ser->shutdown_group) {
-		serializer_shutdown_group_dec(ser->shutdown_group);
+		ast_serializer_shutdown_group_dec(ser->shutdown_group);
 	}
 	ao2_cleanup(ser);
 }
@@ -1418,7 +1332,7 @@ struct ast_taskprocessor *ast_threadpool_serializer_group(const char *name,
 		/* ser ref transferred to listener but not cleaned without tps */
 		ao2_ref(ser, -1);
 	} else if (shutdown_group) {
-		serializer_shutdown_group_inc(shutdown_group);
+		ast_serializer_shutdown_group_inc(shutdown_group);
 	}
 
 	ao2_ref(listener, -1);

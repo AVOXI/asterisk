@@ -764,10 +764,15 @@ struct ast_rtp_codecs {
 	unsigned int framing;
 	/*! The preferred format, as the mappings are numerically sorted */
 	struct ast_format *preferred_format;
+	/*! The preferred dtmf sample rate */
+	int preferred_dtmf_rate;
+	/*! The preferred dtmf payload type */
+	int preferred_dtmf_pt;
 };
 
 #define AST_RTP_CODECS_NULL_INIT \
-    { .codecs_lock = AST_RWLOCK_INIT_VALUE, .payload_mapping_rx = { 0, }, .payload_mapping_tx = { 0, }, .framing = 0, .preferred_format = NULL }
+    { .codecs_lock = AST_RWLOCK_INIT_VALUE, .payload_mapping_rx = { 0, }, .payload_mapping_tx = { 0, }, .framing = 0, .preferred_format = NULL, \
+	.preferred_dtmf_rate = -1, .preferred_dtmf_pt = -1}
 
 /*! Structure that represents the glue that binds an RTP instance to a channel */
 struct ast_rtp_glue {
@@ -974,6 +979,60 @@ int ast_rtp_glue_unregister(struct ast_rtp_glue *glue);
 struct ast_rtp_instance *ast_rtp_instance_new(const char *engine_name,
                 struct ast_sched_context *sched, const struct ast_sockaddr *sa,
                 void *data);
+
+/*!
+ * \brief Options for creating a new RTP instance
+ *
+ * This structure allows passing additional options when creating an
+ * RTP instance via \ref ast_rtp_instance_new_with_options. New fields
+ * can be added in the future without changing the function signature.
+ *
+ * \since 20.20.0
+ * \since 22.10.0
+ * \since 23.4.0
+ */
+struct ast_rtp_instance_options {
+	/*! Starting port number for this instance (0 to use global) */
+	unsigned int port_start;
+	/*! Ending port number for this instance (0 to use global) */
+	unsigned int port_end;
+};
+
+/*!
+ * \brief Create a new RTP instance with additional options
+ *
+ * \param engine_name Name of the engine to use for the RTP instance
+ * \param sched Scheduler context that the RTP engine may want to use
+ * \param sa Address we want to bind to
+ * \param data Unique data for the engine
+ * \param options Pointer to options struct, or NULL to use defaults
+ *
+ * \retval non-NULL success
+ * \retval NULL failure
+ *
+ * Example usage:
+ *
+ * \code
+ * struct ast_rtp_instance_options options = { .port_start = 15000, .port_end = 15010 };
+ * struct ast_rtp_instance *instance = NULL;
+ * instance = ast_rtp_instance_new_with_options(NULL, sched, &sin, NULL, &options);
+ * \endcode
+ *
+ * This creates a new RTP instance using the specified options. When a
+ * per-instance port range is provided the global rtp.conf range is ignored.
+ * If options is NULL or port values are both 0 the global range is used.
+ *
+ * \note The per-instance port range overrides the global rtp.conf settings
+ *       for this specific RTP instance only. It does not need to be a
+ *       subset of the global range.
+ *
+ * \since 20.20.0
+ * \since 22.10.0
+ * \since 23.4.0
+ */
+struct ast_rtp_instance *ast_rtp_instance_new_with_options(const char *engine_name,
+                struct ast_sched_context *sched, const struct ast_sockaddr *sa,
+                void *data, const struct ast_rtp_instance_options *options);
 
 /*!
  * \brief Destroy an RTP instance
@@ -1711,6 +1770,69 @@ struct ast_format *ast_rtp_codecs_get_preferred_format(struct ast_rtp_codecs *co
 int ast_rtp_codecs_set_preferred_format(struct ast_rtp_codecs *codecs, struct ast_format *format);
 
 /*!
+ * \brief Retrieve rx preferred dtmf format payload type
+ *
+ * \param codecs Codecs structure to look in
+ *
+ * \return Payload type of preferred dtmf format.
+ * \retval -1 if not set.
+ *
+ * Example usage:
+ *
+ * \code
+ * int payload;
+ * payload = ast_rtp_codecs_get_preferred_dtmf_format_pt(codec);
+ * \endcode
+ *
+ * This looks up the preferred dtmf format pt on the codec
+ */
+int ast_rtp_codecs_get_preferred_dtmf_format_pt(struct ast_rtp_codecs *codecs);
+
+/*!
+ * \brief Retrieve rx preferred dtmf format sample rate
+ *
+ * \param codecs Codecs structure to look in
+ *
+ * \return Sample rate of preferred dtmf format.
+ * \retval -1 if not set.
+ *
+ * Example usage:
+ *
+ * \code
+ * int sample_rate;
+ * sample_rate = ast_rtp_codecs_get_preferred_dtmf_format_rate(codec);
+ * \endcode
+ *
+ * This looks up the preferred dtmf format sample rate on the codec
+ */
+int ast_rtp_codecs_get_preferred_dtmf_format_rate(struct ast_rtp_codecs *codecs);
+
+/*!
+ * \brief Set the preferred dtmf format pt and sample rate
+ *
+ * \param codecs Codecs structure to set the preferred format in
+ * \param pt Preferred dtmf payload type to set.
+ * \param rate Preferred dtmf payload rate to set.
+ *
+ * \return 0
+ *
+ * \note The format passed this function has its reference count increased. If an existing
+ * 		 format is set, that format is replaced.
+ *
+ * Example usage:
+ *
+ * \code
+ * int dtmf_code = atoi(dtmf_pt);
+ * int dtmf_rate = clock_rate;
+ * ast_rtp_codecs_set_preferred_dtmf_format(codecs, dtmf_code, dtmf_rate);
+ * \endcode
+ *
+ * This sets the preferred dtmf_code and dtmf_rate on the codec.
+ */
+int ast_rtp_codecs_set_preferred_dtmf_format(struct ast_rtp_codecs *codecs, int pt, int rate);
+
+
+/*!
  * \brief Update the format associated with a tx payload type in a codecs structure
  *
  * \param codecs Codecs structure to operate on
@@ -2325,7 +2447,13 @@ int ast_rtp_instance_get_stats(struct ast_rtp_instance *instance, struct ast_rtp
  * \param chan Channel to set the statistics on
  * \param instance The RTP instance that statistics will be retrieved from
  *
- * \note Absolutely _NO_ channel locks should be held before calling this function.
+ * \warning Absolutely _NO_ channel locks should be held before calling this function.
+ * If this channel is in a bridge, ast_rtp_instance_set_stats_vars() will
+ * attempt to lock the bridge peer as well as this channel.  This can cause
+ * a lock inversion if we already have this channel locked and another
+ * thread tries to set bridge variables on the peer because it will have
+ * locked the peer first, then this channel.  For this reason, we must
+ * NOT have the channel locked when we call ast_rtp_instance_set_stats_vars().
  *
  * Example usage:
  *
@@ -2599,6 +2727,32 @@ int ast_rtp_instance_get_hold_timeout(struct ast_rtp_instance *instance);
  * \since 1.8
  */
 int ast_rtp_instance_get_keepalive(struct ast_rtp_instance *instance);
+
+/*!
+ * \brief Get the per-instance RTP port range start
+ *
+ * \param instance The RTP instance
+ *
+ * \return port start value (0 means use global setting)
+ *
+ * \since 20.20.0
+ * \since 22.10.0
+ * \since 23.4.0
+ */
+unsigned int ast_rtp_instance_get_port_start(struct ast_rtp_instance *instance);
+
+/*!
+ * \brief Get the per-instance RTP port range end
+ *
+ * \param instance The RTP instance
+ *
+ * \return port end value (0 means use global setting)
+ *
+ * \since 20.20.0
+ * \since 22.10.0
+ * \since 23.4.0
+ */
+unsigned int ast_rtp_instance_get_port_end(struct ast_rtp_instance *instance);
 
 /*!
  * \brief Get the RTP engine in use on an RTP instance
@@ -2976,6 +3130,20 @@ int ast_rtp_get_rate(const struct ast_format *format);
  * \return A \ref stasis topic
  */
 struct stasis_topic *ast_rtp_topic(void);
+
+/*!
+ * \brief Determine if a type of payload is already present in mappings.
+ * \since 18
+ *
+ * \param codecs Codecs to be checked for mappings.
+ * \param to_match Payload type object to compare against.
+ *
+ * \note It is assumed that codecs is not locked before calling.
+ *
+ * \retval 0 not found
+ * \retval 1 found
+ */
+int ast_rtp_payload_mapping_tx_is_present(struct ast_rtp_codecs *codecs, const struct ast_rtp_payload_type *to_match);
 
 /* RTP debug logging category name */
 #define AST_LOG_CATEGORY_RTP "rtp"

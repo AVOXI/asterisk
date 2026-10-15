@@ -70,7 +70,7 @@ struct ast_ari_channels_originate_args {
 	const char *caller_id;
 	/*! Timeout (in seconds) before giving up dialing, or -1 for no timeout. */
 	int timeout;
-	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice" } } */
+	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing "value" (string) and optional "report_events" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice", "Call_State": { "value": "WaitingForAgent", "report_events": true } } } */
 	struct ast_json *variables;
 	/*! The unique id to assign the channel on creation. */
 	const char *channel_id;
@@ -118,7 +118,7 @@ struct ast_ari_channels_create_args {
 	const char *originator;
 	/*! The format name capability list to use if originator is not specified. Ex. "ulaw,slin16".  Format names can be found with "core show codecs". */
 	const char *formats;
-	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice" } } */
+	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing "value" (string) and optional "report_events" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice", "Call_State": { "value": "WaitingForAgent", "report_events": true } } } */
 	struct ast_json *variables;
 };
 /*!
@@ -175,7 +175,7 @@ struct ast_ari_channels_originate_with_id_args {
 	const char *caller_id;
 	/*! Timeout (in seconds) before giving up dialing, or -1 for no timeout. */
 	int timeout;
-	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice" } } */
+	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing "value" (string) and optional "report_events" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice", "Call_State": { "value": "WaitingForAgent", "report_events": true } } } */
 	struct ast_json *variables;
 	/*! The unique id to assign the second channel when using local channels. */
 	const char *other_channel_id;
@@ -358,6 +358,19 @@ struct ast_ari_channels_ring_stop_args {
  * \param[out] response HTTP response
  */
 void ast_ari_channels_ring_stop(struct ast_variable *headers, struct ast_ari_channels_ring_stop_args *args, struct ast_ari_response *response);
+/*! Argument struct for ast_ari_channels_progress() */
+struct ast_ari_channels_progress_args {
+	/*! Channel's id */
+	const char *channel_id;
+};
+/*!
+ * \brief Indicate progress on a channel.
+ *
+ * \param headers HTTP headers
+ * \param args Swagger parameters
+ * \param[out] response HTTP response
+ */
+void ast_ari_channels_progress(struct ast_variable *headers, struct ast_ari_channels_progress_args *args, struct ast_ari_response *response);
 /*! Argument struct for ast_ari_channels_send_dtmf() */
 struct ast_ari_channels_send_dtmf_args {
 	/*! Channel's id */
@@ -693,6 +706,8 @@ struct ast_ari_channels_set_channel_var_args {
 	const char *variable;
 	/*! The value to set the variable to */
 	const char *value;
+	/*! Whether this variable should be included in channel events. Defaults to false. */
+	int report_events;
 };
 /*!
  * \brief Body parsing function for /channels/{channelId}/variable.
@@ -713,6 +728,62 @@ int ast_ari_channels_set_channel_var_parse_body(
  * \param[out] response HTTP response
  */
 void ast_ari_channels_set_channel_var(struct ast_variable *headers, struct ast_ari_channels_set_channel_var_args *args, struct ast_ari_response *response);
+/*! Argument struct for ast_ari_channels_get_channel_vars() */
+struct ast_ari_channels_get_channel_vars_args {
+	/*! Channel's id */
+	const char *channel_id;
+	/*! Array of The channel variables or functions to get */
+	const char **variables;
+	/*! Length of variables array. */
+	size_t variables_count;
+	/*! Parsing context for variables. */
+	char *variables_parse;
+};
+/*!
+ * \brief Body parsing function for /channels/{channelId}/variables.
+ * \param body The JSON body from which to parse parameters.
+ * \param[out] args The args structure to parse into.
+ * \retval zero on success
+ * \retval non-zero on failure
+ */
+int ast_ari_channels_get_channel_vars_parse_body(
+	struct ast_json *body,
+	struct ast_ari_channels_get_channel_vars_args *args);
+
+/*!
+ * \brief Get the value of multiple channel variables or functions.
+ *
+ * \param headers HTTP headers
+ * \param args Swagger parameters
+ * \param[out] response HTTP response
+ */
+void ast_ari_channels_get_channel_vars(struct ast_variable *headers, struct ast_ari_channels_get_channel_vars_args *args, struct ast_ari_response *response);
+/*! Argument struct for ast_ari_channels_set_channel_vars() */
+struct ast_ari_channels_set_channel_vars_args {
+	/*! Channel's id */
+	const char *channel_id;
+	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel. Each variable value may be either a string or an object containing "value" (string) and optional "report_events" (boolean) to include updates for that variable in channel events (defaults to false). Ex. { "variables": { "CALLERID(name)": "Alice", "Call_State": { "value": "WaitingForAgent", "report_events": true } } } */
+	struct ast_json *variables;
+};
+/*!
+ * \brief Body parsing function for /channels/{channelId}/variables.
+ * \param body The JSON body from which to parse parameters.
+ * \param[out] args The args structure to parse into.
+ * \retval zero on success
+ * \retval non-zero on failure
+ */
+int ast_ari_channels_set_channel_vars_parse_body(
+	struct ast_json *body,
+	struct ast_ari_channels_set_channel_vars_args *args);
+
+/*!
+ * \brief Set the values of multiple channel variables or functions.
+ *
+ * \param headers HTTP headers
+ * \param args Swagger parameters
+ * \param[out] response HTTP response
+ */
+void ast_ari_channels_set_channel_vars(struct ast_variable *headers, struct ast_ari_channels_set_channel_vars_args *args, struct ast_ari_response *response);
 /*! Argument struct for ast_ari_channels_snoop_channel() */
 struct ast_ari_channels_snoop_channel_args {
 	/*! Channel's id */
@@ -832,15 +903,15 @@ struct ast_ari_channels_external_media_args {
 	const char *channel_id;
 	/*! Stasis Application to place channel into */
 	const char *app;
-	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice" } } */
+	/*! The "variables" key in the body object holds variable key/value pairs to set on the channel on creation. Each variable value may be either a string or an object containing "value" (string) and optional "report_events" (boolean) to include updates for that variable in channel events (defaults to false). Other keys in the body object are interpreted as query parameters. Ex. { "endpoint": "SIP/Alice", "variables": { "CALLERID(name)": "Alice", "Call_State": { "value": "WaitingForAgent", "report_events": true } } } */
 	struct ast_json *variables;
-	/*! Hostname/ip:port of external host */
+	/*! Hostname/ip:port or websocket_client connection ID of external host.  May be empty for a websocket server connection. */
 	const char *external_host;
-	/*! Payload encapsulation protocol */
+	/*! Payload encapsulation protocol.  Must be 'none' for the websocket transport. */
 	const char *encapsulation;
 	/*! Transport protocol */
 	const char *transport;
-	/*! Connection type (client/server) */
+	/*! Connection type (client/server). 'server' is only valid for the websocket transport. */
 	const char *connection_type;
 	/*! Format to encode audio in */
 	const char *format;
@@ -848,6 +919,8 @@ struct ast_ari_channels_external_media_args {
 	const char *direction;
 	/*! An arbitrary data field */
 	const char *data;
+	/*! Transport-specific data. For websocket this is appended to the dialstring. */
+	const char *transport_data;
 };
 /*!
  * \brief Body parsing function for /channels/externalMedia.
@@ -863,12 +936,78 @@ int ast_ari_channels_external_media_parse_body(
 /*!
  * \brief Start an External Media session.
  *
- * Create a channel to an External Media source/sink.
+ * Create a channel to an External Media source/sink.  The combination of transport and encapsulation will select one of chan_rtp(udp/rtp), chan_audiosocket(tcp/audiosocket) or chan_websocket(websocket/none) channel drivers.
  *
  * \param headers HTTP headers
  * \param args Swagger parameters
  * \param[out] response HTTP response
  */
 void ast_ari_channels_external_media(struct ast_variable *headers, struct ast_ari_channels_external_media_args *args, struct ast_ari_response *response);
+/*! Argument struct for ast_ari_channels_transfer_progress() */
+struct ast_ari_channels_transfer_progress_args {
+	/*! Channel's id */
+	const char *channel_id;
+	/*! The state of the progress */
+	const char *states;
+};
+/*!
+ * \brief Body parsing function for /channels/{channelId}/transfer_progress.
+ * \param body The JSON body from which to parse parameters.
+ * \param[out] args The args structure to parse into.
+ * \retval zero on success
+ * \retval non-zero on failure
+ */
+int ast_ari_channels_transfer_progress_parse_body(
+	struct ast_json *body,
+	struct ast_ari_channels_transfer_progress_args *args);
+
+/*!
+ * \brief Inform the channel about the progress of the attended/blind transfer.
+ *
+ * \param headers HTTP headers
+ * \param args Swagger parameters
+ * \param[out] response HTTP response
+ */
+void ast_ari_channels_transfer_progress(struct ast_variable *headers, struct ast_ari_channels_transfer_progress_args *args, struct ast_ari_response *response);
+/*! Argument struct for ast_ari_channels_recording_fork() */
+struct ast_ari_channels_recording_fork_args {
+	/*! Channel's id. The initiating PJSIP channel, not a new recording channel. */
+	const char *channel_id;
+	/*! JSON body. Fields are action, orgId, callId, and for start also sentHost, sentPort, heardHost, heardPort, and codec. timeoutMs is optional. */
+	struct ast_json *request;
+	/*! start or stop */
+	const char *action;
+	/*! Organization id placed in the FORK_START / FORK_STOP body */
+	const char *org_id;
+	/*! Call id placed in the FORK_START / FORK_STOP body */
+	const char *call_id;
+	/*! Start only. IPv4 address or hostname that receives initiator-sent audio */
+	const char *sent_host;
+	/*! Start only. IPv4 address or hostname that receives initiator-heard audio */
+	const char *heard_host;
+	/*! Start only. Codec name placed in the FORK_START body */
+	const char *codec;
+};
+/*!
+ * \brief Body parsing function for /channels/{channelId}/recordingFork.
+ * \param body The JSON body from which to parse parameters.
+ * \param[out] args The args structure to parse into.
+ * \retval zero on success
+ * \retval non-zero on failure
+ */
+int ast_ari_channels_recording_fork_parse_body(
+	struct ast_json *body,
+	struct ast_ari_channels_recording_fork_args *args);
+
+/*!
+ * \brief Start or stop an in-dialog recording fork.
+ *
+ * Sends FORK_START or FORK_STOP as a text/plain MESSAGE on the channel's existing PJSIP dialog. The request does not create a channel, send SDP, or re-INVITE. sentHost and heardHost are an IPv4 address or hostname; the body field is host:port. A 200 body is {"sipStatus": n} when the final SIP response is 2xx. A final SIP response of 300 or higher is HTTP 500 with the same body.
+ *
+ * \param headers HTTP headers
+ * \param args Swagger parameters
+ * \param[out] response HTTP response
+ */
+void ast_ari_channels_recording_fork(struct ast_variable *headers, struct ast_ari_channels_recording_fork_args *args, struct ast_ari_response *response);
 
 #endif /* _ASTERISK_RESOURCE_CHANNELS_H */

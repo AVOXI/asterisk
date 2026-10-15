@@ -52,6 +52,9 @@
 
 /*** DOCUMENTATION
 	<application name="ExternalIVR" language="en_US">
+		<since>
+			<version>1.2.0</version>
+		</since>
 		<synopsis>
 			Interfaces with an external IVR application.
 		</synopsis>
@@ -308,12 +311,11 @@ static void ast_eivr_getvariable(struct ast_channel *chan, char *data, char *out
 
 	char *inbuf, *variable;
 	const char *value;
-	int j;
 	struct ast_str *newstring = ast_str_alloca(outbuflen);
 
 	outbuf[0] = '\0';
 
-	for (j = 1, inbuf = data; ; j++) {
+	for (inbuf = data; ; ) {
 		variable = strsep(&inbuf, ",");
 		if (variable == NULL) {
 			int outstrlen = strlen(outbuf);
@@ -421,8 +423,11 @@ static int app_exec(struct ast_channel *chan, const char *data)
 		AST_APP_ARG(application);
 		AST_APP_ARG(options);
 	);
+
+#define MAX_EIVR_APPLICATION_ARGS 32
+
 	AST_DECLARE_APP_ARGS(application_args,
-		AST_APP_ARG(cmd)[32];
+		AST_APP_ARG(cmd)[MAX_EIVR_APPLICATION_ARGS];
 	);
 
 	u->abort_current_sound = 0;
@@ -455,7 +460,7 @@ static int app_exec(struct ast_channel *chan, const char *data)
 
 	/* Put the application + the arguments in a , delimited list */
 	ast_str_reset(comma_delim_args);
-	for (j = 0; application_args.cmd[j] != NULL; j++) {
+	for (j = 0; j < MAX_EIVR_APPLICATION_ARGS && application_args.cmd[j]; j++) {
 		ast_str_append(&comma_delim_args, 0, "%s%s", j == 0 ? "" : ",", application_args.cmd[j]);
 	}
 
@@ -834,7 +839,7 @@ static int eivr_comm(struct ast_channel *chan, struct ivr_localuser *u,
 				}
 			} else if (input[0] == EIVR_CMD_GET) {
 				char response[2048];
-				ast_verb(4, "Retriving Variables from channel: %s\n", &input[2]);
+				ast_verb(4, "Retrieving Variables from channel: %s\n", &input[2]);
 				ast_eivr_getvariable(chan, &input[2], response, sizeof(response));
 				send_eivr_event(eivr_events, 'G', response, chan);
 			} else if (input[0] == EIVR_CMD_SVAR) {
@@ -844,7 +849,7 @@ static int eivr_comm(struct ast_channel *chan, struct ivr_localuser *u,
 				ast_chan_log(LOG_NOTICE, chan, "Log message from EIVR: %s\n", &input[2]);
 			} else if (input[0] == EIVR_CMD_XIT) {
 				ast_chan_log(LOG_NOTICE, chan, "Exiting: %s\n", &input[2]);
-				ast_chan_log(LOG_WARNING, chan, "e'X'it command is depricated, use 'E'xit instead\n");
+				ast_chan_log(LOG_WARNING, chan, "e'X'it command is deprecated, use 'E'xit instead\n");
 				res = 0;
 				break;
 			} else if (input[0] == EIVR_CMD_EXIT) {

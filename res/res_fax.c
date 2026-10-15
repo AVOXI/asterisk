@@ -91,6 +91,9 @@
 
 /*** DOCUMENTATION
 	<application name="ReceiveFAX" language="en_US" module="res_fax">
+		<since>
+			<version>11.0.0</version>
+		</since>
 		<synopsis>
 			Receive a FAX and save as a TIFF/F file.
 		</synopsis>
@@ -116,13 +119,52 @@
 		<description>
  			<para>This application is provided by res_fax, which is a FAX technology agnostic module
  			that utilizes FAX technology resource modules to complete a FAX transmission.</para>
- 			<para>Session arguments can be set by the FAXOPT function and to check results of the ReceiveFAX() application.</para>
+			<para>Session arguments can be set by the FAXOPT function and to check results of the ReceiveFAX() application.</para>
+			<variablelist>
+				<variable name="FAXSTATUS">
+					<para>Whether the fax transmission was successful</para>
+					<value name="SUCCESS"/>
+					<value name="FAILURE"/>
+				</variable>
+				<variable name="FAXERROR">
+					<para>Description of what caused the fax to fail</para>
+					<value name="MEMORY_ERROR"/>
+					<value name="Channel Problems"/>
+				</variable>
+				<variable name="FAXSTATUSSTRING">
+					<para>Detailed description of the status of the fax transmission</para>
+				</variable>
+				<variable name="LOCALSTATIONID">
+					<para>Local Station ID</para>
+				</variable>
+				<variable name="REMOTESTATIONID">
+					<para>Remote Station ID</para>
+				</variable>
+				<variable name="FAXPAGES">
+					<para>Number of pages in the fax</para>
+				</variable>
+				<variable name="FAXBITRATE">
+					<para>Bit rate of the fax transmission</para>
+				</variable>
+				<variable name="FAXRESOLUTION">
+					<para>Resolution of the fax document</para>
+				</variable>
+				<variable name="FAXMODE">
+					<para>Fax transmission mode</para>
+					<value name="audio"/>
+					<value name="T38"/>
+				</variable>
+			</variablelist>
 		</description>
 		<see-also>
+			<ref type="application">SendFAX</ref>
 			<ref type="function">FAXOPT</ref>
 		</see-also>
 	</application>
 	<application name="SendFAX" language="en_US" module="res_fax">
+		<since>
+			<version>11.0.0</version>
+		</since>
 		<synopsis>
 			Sends a specified TIFF/F file as a FAX.
 		</synopsis>
@@ -155,13 +197,52 @@
 		<description>
  			<para>This application is provided by res_fax, which is a FAX technology agnostic module
  			that utilizes FAX technology resource modules to complete a FAX transmission.</para>
- 			<para>Session arguments can be set by the FAXOPT function and to check results of the SendFAX() application.</para>
+			<para>Session arguments can be set by the FAXOPT function and to check results of the SendFAX() application.</para>
+			<variablelist>
+				<variable name="FAXSTATUS">
+					<para>Whether the fax transmission was successful</para>
+					<value name="SUCCESS"/>
+					<value name="FAILURE"/>
+				</variable>
+				<variable name="FAXERROR">
+					<para>Description of what caused the fax to fail</para>
+					<value name="MEMORY_ERROR"/>
+					<value name="Channel Problems"/>
+				</variable>
+				<variable name="FAXSTATUSSTRING">
+					<para>Detailed description of the status of the fax transmission</para>
+				</variable>
+				<variable name="LOCALSTATIONID">
+					<para>Local Station ID</para>
+				</variable>
+				<variable name="REMOTESTATIONID">
+					<para>Remote Station ID</para>
+				</variable>
+				<variable name="FAXPAGES">
+					<para>Number of pages in the fax</para>
+				</variable>
+				<variable name="FAXBITRATE">
+					<para>Bit rate of the fax transmission</para>
+				</variable>
+				<variable name="FAXRESOLUTION">
+					<para>Resolution of the fax document</para>
+				</variable>
+				<variable name="FAXMODE">
+					<para>Fax transmission mode</para>
+					<value name="audio"/>
+					<value name="T38"/>
+				</variable>
+			</variablelist>
 		</description>
 		<see-also>
+			<ref type="application">ReceiveFAX</ref>
 			<ref type="function">FAXOPT</ref>
 		</see-also>
 	</application>
 	<function name="FAXOPT" language="en_US" module="res_fax">
+		<since>
+			<version>11.0.0</version>
+		</since>
 		<synopsis>
 			Gets/sets various pieces of information about a fax session.
 		</synopsis>
@@ -241,6 +322,9 @@
 		</see-also>
 	</function>
 	<manager name="FAXSessions" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			Lists active FAX sessions
 		</synopsis>
@@ -255,6 +339,9 @@
 	</manager>
 	<managerEvent language="en_US" name="FAXSessionsEntry">
 		<managerEventInstance class="EVENT_FLAG_REPORTING">
+			<since>
+				<version>13.0.0</version>
+			</since>
 			<synopsis>A single list item for the FAXSessions AMI command</synopsis>
 			<syntax>
 				<parameter name="ActionID" required="false"/>
@@ -305,6 +392,9 @@
 	</managerEvent>
 	<managerEvent language="en_US" name="FAXSessionsComplete">
 		<managerEventInstance class="EVENT_FLAG_CALL">
+			<since>
+				<version>13.0.0</version>
+			</since>
 			<synopsis>Raised when all FAXSession events are completed for a FAXSessions command</synopsis>
 			<syntax>
 				<parameter name="ActionID" required="false"/>
@@ -315,6 +405,9 @@
 		</managerEventInstance>
 	</managerEvent>
 	<manager name="FAXSession" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			Responds with a detailed description of a single FAX session
 		</synopsis>
@@ -333,6 +426,9 @@
 	</manager>
 	<managerEvent language="en_US" name="FAXSession">
 		<managerEventInstance class="EVENT_FLAG_REPORTING">
+			<since>
+				<version>13.0.0</version>
+			</since>
 			<synopsis>Raised in response to FAXSession manager command</synopsis>
 			<syntax>
 				<parameter name="ActionID" required="false"/>
@@ -384,6 +480,9 @@
 		</managerEventInstance>
 	</managerEvent>
 	<manager name="FAXStats" language="en_US">
+		<since>
+			<version>13.0.0</version>
+		</since>
 		<synopsis>
 			Responds with fax statistics
 		</synopsis>
@@ -398,6 +497,9 @@
 	</manager>
 	<managerEvent language="en_US" name="FAXStats">
 		<managerEventInstance class="EVENT_FLAG_REPORTING">
+			<since>
+				<version>13.0.0</version>
+			</since>
 			<synopsis>Raised in response to FAXStats manager command</synopsis>
 			<syntax>
 				<parameter name="ActionID" required="false"/>
@@ -4529,7 +4631,7 @@ static int acf_faxopt_read(struct ast_channel *chan, const char *cmd, char *data
 	char *filenames;
 
 	if (!details) {
-		ast_log(LOG_ERROR, "channel '%s' can't read FAXOPT(%s) because it has never been written.\n", ast_channel_name(chan), data);
+		ast_debug(3, "channel '%s' can't read FAXOPT(%s) because it has never been written.\n", ast_channel_name(chan), data);
 		return -1;
 	}
 	if (!strcasecmp(data, "ecm")) {
@@ -4543,14 +4645,14 @@ static int acf_faxopt_read(struct ast_channel *chan, const char *cmd, char *data
 		ast_copy_string(buf, details->error, len);
 	} else if (!strcasecmp(data, "filename")) {
 		if (AST_LIST_EMPTY(&details->documents)) {
-			ast_log(LOG_ERROR, "channel '%s' can't read FAXOPT(%s) because it has never been written.\n", ast_channel_name(chan), data);
+			ast_debug(3, "channel '%s' can't read FAXOPT(%s) because it has never been written.\n", ast_channel_name(chan), data);
 			res = -1;
 		} else {
 			ast_copy_string(buf, AST_LIST_FIRST(&details->documents)->filename, len);
 		}
 	} else if (!strcasecmp(data, "filenames")) {
 		if (AST_LIST_EMPTY(&details->documents)) {
-			ast_log(LOG_ERROR, "channel '%s' can't read FAXOPT(%s) because it has never been written.\n", ast_channel_name(chan), data);
+			ast_debug(3, "channel '%s' can't read FAXOPT(%s) because it has never been written.\n", ast_channel_name(chan), data);
 			res = -1;
 		} else if ((filenames = generate_filenames_string(details, "", ","))) {
 			ast_copy_string(buf, filenames, len);
@@ -4619,7 +4721,7 @@ static int acf_faxopt_write(struct ast_channel *chan, const char *cmd, char *dat
 		}
 	} else if (!strcasecmp(data, "t38gateway") || !strcasecmp(data, "gateway") ||
 		   !strcasecmp(data, "t38_gateway") || !strcasecmp(data, "faxgateway")) {
-		const char *val = ast_skip_blanks(value);
+		char *val = ast_strdupa(ast_skip_blanks(value));
 		char *timeout = strchr(val, ',');
 
 		if (timeout) {
@@ -4658,7 +4760,7 @@ static int acf_faxopt_write(struct ast_channel *chan, const char *cmd, char *dat
 			ast_log(LOG_WARNING, "Unsupported value '%s' passed to FAXOPT(%s).\n", value, data);
 		}
 	} else if (!strcasecmp(data, "faxdetect")) {
-		const char *val = ast_skip_blanks(value);
+		char *val = ast_strdupa(ast_skip_blanks(value));
 		char *timeout = strchr(val, ',');
 		unsigned int fdtimeout = 0;
 		int flags;

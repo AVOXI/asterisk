@@ -57,6 +57,9 @@ static const char app[] = "ADSIProg";
 
 /*** DOCUMENTATION
 	<application name="ADSIProg" language="en_US">
+		<since>
+			<version>0.1.12</version>
+		</since>
 		<synopsis>
 			Load Asterisk ADSI Scripts into phone
 		</synopsis>
@@ -845,7 +848,10 @@ static int onevent(char *buf, char *name, int id, char *args, struct adsi_script
 			return 0;
 		}
 		/* Process 'in' things */
-		tok = get_token(&args, script, lineno);
+		if (!(tok = get_token(&args, script, lineno))) {
+			ast_log(LOG_WARNING, "Missing state name at line %d of %s\n", lineno, script);
+			return 0;
+		}
 		if (process_token(sname, tok, sizeof(sname), ARG_STRING)) {
 			ast_log(LOG_WARNING, "'%s' is not a valid state name at line %d of %s\n", tok, lineno, script);
 			return 0;

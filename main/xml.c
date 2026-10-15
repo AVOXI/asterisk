@@ -25,6 +25,7 @@
 	<support_level>core</support_level>
  ***/
 
+#define ASTMM_LIBC ASTMM_IGNORE
 #include "asterisk.h"
 #include "asterisk/xml.h"
 #include "asterisk/logger.h"
@@ -99,7 +100,7 @@ struct ast_xml_doc *ast_xml_open(char *filename)
 		return NULL;
 	}
 
-	doc = xmlReadFile(filename, NULL, XML_PARSE_RECOVER | XML_PARSE_NOENT);
+	doc = xmlReadFile(filename, NULL, XML_PARSE_RECOVER | XML_PARSE_NONET);
 	if (!doc) {
 		return NULL;
 	}
@@ -304,7 +305,7 @@ struct ast_xml_node *ast_xml_find_element(struct ast_xml_node *root_node, const 
 	}
 
 	for (cur = root_node; cur; cur = ast_xml_node_get_next(cur)) {
-		/* Check if the name matchs */
+		/* Check if the name matches */
 		if (strcmp(ast_xml_node_get_name(cur), name)) {
 			continue;
 		}
@@ -503,7 +504,7 @@ struct ast_xslt_doc *ast_xslt_open(char *filename)
 	xsltStylesheet *xslt;
 	xmlDoc *xml;
 
-	xml = xmlReadFile(filename, NULL, XML_PARSE_RECOVER | XML_PARSE_NOENT);
+	xml = xmlReadFile(filename, NULL, XML_PARSE_RECOVER | XML_PARSE_NONET);
 	if (!xml) {
 		return NULL;
 	}
@@ -531,7 +532,7 @@ struct ast_xslt_doc *ast_xslt_read_memory(char *buffer, size_t size)
 		return NULL;
 	}
 
-	doc = xmlReadMemory(buffer, (int) size, NULL, NULL, XML_PARSE_RECOVER | XML_PARSE_NOENT);
+	doc = xmlReadMemory(buffer, (int) size, NULL, NULL, XML_PARSE_RECOVER | XML_PARSE_NONET);
 	if (!doc) {
 		return NULL;
 	}

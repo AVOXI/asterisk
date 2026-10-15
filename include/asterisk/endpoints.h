@@ -170,6 +170,18 @@ const char *ast_endpoint_get_id(const struct ast_endpoint *endpoint);
 enum ast_endpoint_state ast_endpoint_get_state(const struct ast_endpoint *endpoint);
 
 /*!
+ * \brief Gets the latest snapshot of the given endpoint.
+ *
+ * \param endpoint The endpoint.
+ * \return Latest snapshot of the endpoint.
+ * \retval NULL if endpoint is \c NULL.
+ * \since 20.19.0
+ * \since 22.9.0
+ * \since 23.3.0
+ */
+struct ast_endpoint_snapshot *ast_endpoint_get_snapshot(struct ast_endpoint *endpoint);
+
+/*!
  * \brief Updates the state of the given endpoint.
  *
  * \param endpoint Endpoint to modify.
@@ -210,5 +222,18 @@ void ast_endpoint_set_max_channels(struct ast_endpoint *endpoint,
 int ast_endpoint_add_channel(struct ast_endpoint *endpoint,
 	struct ast_channel *chan);
 
+/*!
+ * \brief Removes a channel from the given endpoint.
+ * \since 23.1.0
+ * \since 22.7.0
+ * \since 20.17.0
+ *
+ * \param endpoint
+ * \param chan Channel.
+ * \retval 0 on success.
+ * \retval Non-zero on error.
+ */
+ int ast_endpoint_remove_channel(struct ast_endpoint *endpoint,
+	struct ast_channel *chan);
 
 #endif /* _ASTERISK_ENDPOINTS_H */

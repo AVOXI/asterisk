@@ -120,6 +120,9 @@
 /*** DOCUMENTATION
 	<managerEvent language="en_US" name="DeviceStateChange">
 		<managerEventInstance class="EVENT_FLAG_CALL">
+			<since>
+				<version>13.0.0</version>
+			</since>
 			<synopsis>Raised when a device state changes</synopsis>
 			<syntax>
 				<parameter name="Device">
@@ -179,8 +182,8 @@ static const struct chan2dev {
 	{ AST_STATE_RESERVED,        AST_DEVICE_INUSE },
 	{ AST_STATE_OFFHOOK,         AST_DEVICE_INUSE },
 	{ AST_STATE_DIALING,         AST_DEVICE_INUSE },
-	{ AST_STATE_RING,            AST_DEVICE_INUSE },
-	{ AST_STATE_RINGING,         AST_DEVICE_RINGING },
+	{ AST_STATE_RING,            AST_DEVICE_INUSE }, /* Audible ringback tone */
+	{ AST_STATE_RINGING,         AST_DEVICE_RINGING }, /* Actual ringing */
 	{ AST_STATE_UP,              AST_DEVICE_INUSE },
 	{ AST_STATE_BUSY,            AST_DEVICE_BUSY },
 	{ AST_STATE_DIALING_OFFHOOK, AST_DEVICE_INUSE },
@@ -306,14 +309,14 @@ enum ast_device_state ast_parse_device_state(const char *device)
 	return res;
 }
 
-static enum ast_device_state devstate_cached(const char *device)
+static enum ast_device_state devstate_cached(const char *device, const struct ast_eid *eid)
 {
 	struct stasis_message *cached_msg;
 	struct ast_device_state_message *device_state;
 	enum ast_device_state state;
 
 	cached_msg = stasis_cache_get_by_eid(ast_device_state_cache(),
-		ast_device_state_message_type(), device, NULL);
+		ast_device_state_message_type(), device, eid);
 	if (!cached_msg) {
 		return AST_DEVICE_UNKNOWN;
 	}
@@ -335,7 +338,7 @@ static enum ast_device_state _ast_device_state(const char *device, int check_cac
 
 	/* If the last known state is cached, just return that */
 	if (check_cache) {
-		res = devstate_cached(device);
+		res = devstate_cached(device, NULL);
 		if (res != AST_DEVICE_UNKNOWN) {
 			return res;
 		}
@@ -722,6 +725,16 @@ int ast_publish_device_state_full(
 		return -1;
 	}
 
+	if (cachable) {
+		enum ast_device_state res;
+
+		/* If the state is unchanged, do not publish */
+		res = devstate_cached(device, eid);
+		if (res == state) {
+			return 0;
+		}
+	}
+
 	device_state = device_state_alloc(device, state, cachable, eid);
 	if (!device_state) {
 		return -1;
@@ -780,7 +793,7 @@ static const char *device_state_get_id(struct stasis_message *message)
  * \since 12.2.0
  *
  * \param cache_topic Caching topic the aggregate message may be published over.
- * \param aggregate The aggregate shapshot message to publish.
+ * \param aggregate The aggregate snapshot message to publish.
  */
 static void device_state_aggregate_publish(struct stasis_topic *cache_topic, struct stasis_message *aggregate)
 {
@@ -805,7 +818,7 @@ static void device_state_aggregate_publish(struct stasis_topic *cache_topic, str
  * \since 12.2.0
  *
  * \param entry Cache entry to calculate a new aggregate snapshot.
- * \param new_snapshot The shapshot that is being updated.
+ * \param new_snapshot The snapshot that is being updated.
  *
  * \note Return a ref bumped pointer from stasis_cache_entry_get_aggregate()
  * if a new aggregate could not be calculated because of error.

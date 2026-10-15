@@ -31,7 +31,11 @@ ifeq ($(PJPROJECT_BUNDLED),yes)
 SRC:=$(filter-out libasteriskpj.c,$(SRC))
 endif
 OBJSFILTER:=$(MOD_OBJS) fskmodem_int.o fskmodem_float.o cygload.o buildinfo.o
-OBJS=$(filter-out $(OBJSFILTER),$(SRC:.c=.o))
+
+SRC_CC:=$(filter-out $(addsuffix .cc,$(MENUSELECT_CHANNELSTORAGE)),$(wildcard *.cc))
+SRC:=$(filter-out $(addsuffix .c,$(MENUSELECT_CHANNELSTORAGE)),$(SRC))
+
+OBJS=$(filter-out $(OBJSFILTER),$(SRC:.c=.o) $(SRC_CC:.cc=.oo))
 
 # we need to link in the objects statically, not as a library, because
 # otherwise modules will not have them available if none of the static
@@ -69,7 +73,9 @@ endif
 ifneq ($(findstring darwin,$(OSARCH)),)
   AST_LIBS+=-lresolv
   ASTLINK=-mmacosx-version-min=10.6 -Wl,-undefined,dynamic_lookup -force_flat_namespace
-  ASTLINK+=/usr/lib/bundle1.o
+  ifneq ($(wildcard /usr/lib/bundle1.o),)
+    ASTLINK+=/usr/lib/bundle1.o
+  endif
 else
 # These are used for all but Darwin
   ASTLINK+=-Wl,--export-dynamic
@@ -147,6 +153,7 @@ endif
 stdtime/localtime.o: _ASTCFLAGS+=$(AST_NO_STRICT_OVERFLOW) -Wno-format-nonliteral
 
 asterisk.o: _ASTCFLAGS+=$(LIBEDIT_INCLUDE)
+ast_expr2.o: _ASTCFLAGS+=-Wno-unused
 ast_expr2f.o: _ASTCFLAGS+=-Wno-unused
 astmm.o: _ASTCFLAGS+=$(call get_menuselect_cflags,MALLOC_DEBUG DEBUG_CHAOS)
 astobj2.o astobj2_container.o astobj2_hash.o astobj2_rbtree.o: _ASTCFLAGS+=$(call get_menuselect_cflags,AO2_DEBUG)
@@ -252,7 +259,6 @@ PJDIR=$(ASTTOPDIR)/$(PJPROJECT_DIR)/source
 
 PJPROJECT_LDLIBS := \
 -Wl,--whole-archive \
-$(PJSUA_LIB_LDLIB) \
 $(PJSIP_UA_LDLIB) \
 $(PJSIP_SIMPLE_LDLIB) \
 $(PJSIP_LDLIB) \
@@ -302,11 +308,27 @@ $(ASTPJ_LIB): $(ASTPJ_LIB).$(ASTPJ_SO_VERSION)
 else # Darwin
 ASTPJ_LIB:=libasteriskpj.dylib
 
+# Darwin-specific: use -force_load to include all symbols from static archives
+# This is equivalent to GNU ld's --whole-archive
+PJPROJECT_SRCDIR := $(ASTTOPDIR)/third-party/pjproject/source
+PJ_TARGET := aarch64-apple-darwin25.2.0
+PJPROJECT_DARWIN_LIBS := \
+-force_load $(PJPROJECT_SRCDIR)/pjsip/lib/libpjsip-ua-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjsip/lib/libpjsip-simple-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjsip/lib/libpjsip-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjnath/lib/libpjnath-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjmedia/lib/libpjmedia-codec-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjmedia/lib/libpjmedia-videodev-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjmedia/lib/libpjmedia-audiodev-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjmedia/lib/libpjmedia-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjlib-util/lib/libpjlib-util-$(PJ_TARGET).a \
+-force_load $(PJPROJECT_SRCDIR)/pjlib/lib/libpj-$(PJ_TARGET).a
+
 # -install_name allows library to be found if installed somewhere other than
 # /lib or /usr/lib
-$(ASTPJ_LIB): _ASTLDFLAGS+=-dynamiclib -install_name $(ASTLIBDIR)/$(ASTPJ_LIB) $(PJ_LDFLAGS)
+$(ASTPJ_LIB): _ASTLDFLAGS+=-dynamiclib -install_name $(ASTLIBDIR)/$(ASTPJ_LIB)
 $(ASTPJ_LIB): _ASTCFLAGS+=-fPIC -DAST_MODULE=\"asteriskpj\" $(PJ_CFLAGS) -DAST_NOT_MODULE
-$(ASTPJ_LIB): LIBS+=$(PJPROJECT_LIB) $(OPENSSL_LIB) $(UUID_LIB) -lm -lpthread $(RT_LIB)
+$(ASTPJ_LIB): LIBS+=$(PJPROJECT_DARWIN_LIBS) $(OPENSSL_LIB) $(UUID_LIB) -lm -lpthread $(RT_LIB) -framework Foundation -framework AppKit
 $(ASTPJ_LIB): SOLINK=$(DYLINK)
 
 # Special rules for building a shared library (not a dynamically loadable module)

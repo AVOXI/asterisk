@@ -43,6 +43,9 @@
 
 /*** DOCUMENTATION
 	<application name="Playback" language="en_US">
+		<since>
+			<version>0.1.0</version>
+		</since>
 		<synopsis>
 			Play a file.
 		</synopsis>
@@ -94,7 +97,7 @@
 			<para>WaitExten (application) -- wait for digits from caller, optionally play music on hold</para>
 		</description>
 		<see-also>
-			<ref type="application">Background</ref>
+			<ref type="application">BackGround</ref>
 			<ref type="application">WaitExten</ref>
 			<ref type="application">ControlPlayback</ref>
 			<ref type="agi">stream file</ref>
@@ -188,6 +191,7 @@ static int do_say(say_args_t *a, const char *s, const char *options, int depth)
 	struct ast_variable *v;
 	char *lang;
 	char *x;
+	const char *y;
 	char *rule = NULL;
 	char *rule_head = NULL;
 	int ret = 0;
@@ -228,10 +232,10 @@ static int do_say(say_args_t *a, const char *s, const char *options, int depth)
 		return 0;
 
 	/* skip up to two prefixes to get the value */
-	if ( (x = strchr(s, ':')) )
-		s = x + 1;
-	if ( (x = strchr(s, ':')) )
-		s = x + 1;
+	if ( (y = strchr(s, ':')) )
+		s = y + 1;
+	if ( (y = strchr(s, ':')) )
+		s = y + 1;
 	ast_debug(2, "value is <%s>\n", s);
 	n = ast_var_assign("SAY", s);
 	if (!n) {

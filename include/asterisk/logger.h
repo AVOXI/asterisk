@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 #define EVENTLOG "event_log"
-#define	QUEUELOG	"queue_log"
+#define	QUEUELOG "queue_log"
 
 #define DEBUG_M(a) { \
 	a; \
@@ -55,7 +55,7 @@ extern "C" {
 #define AST_CALLID_BUFFER_LENGTH 13
 
 enum ast_logger_results {
-	AST_LOGGER_SUCCESS = 0, /*!< Log channel was created or deleted successfully*/
+	AST_LOGGER_SUCCESS = 0, /*!< Log channel was created or deleted successfully */
 	AST_LOGGER_FAILURE = 1, /*!< Log channel already exists for create or doesn't exist for deletion of log channel */
 	AST_LOGGER_DECLINE = -1, /*!< Log channel request was not accepted */
 	AST_LOGGER_ALLOC_ERROR = -2 /*!< filename allocation error */
@@ -68,7 +68,7 @@ enum ast_logger_results {
 	on which log you wish to output to. These are implemented as macros, that
 	will provide the function with the needed arguments.
 
- 	\param level	Type of log event
+	\param level	Type of log event
 	\param file	Will be provided by the AST_LOG_* macro
 	\param line	Will be provided by the AST_LOG_* macro
 	\param function	Will be provided by the AST_LOG_* macro
@@ -162,7 +162,9 @@ void __attribute__((format(printf, 5, 6))) ast_queue_log(const char *queuename, 
  *
  * \details This works like ast_log, but prints verbose messages to the console depending on verbosity level set.
  *
+ * \code
  * ast_verbose(VERBOSE_PREFIX_3 "Whatever %s is happening\n", "nothing");
+ * \endcode
  *
  * This will print the message to the console if the verbose level is set to a level >= 3
  *
@@ -189,9 +191,6 @@ void __attribute__((format(printf, 6, 7))) __ast_verbose_callid(const char *file
 void __attribute__((format(printf, 6, 0))) __ast_verbose_ap(const char *file, int line, const char *func, int level, ast_callid callid, const char *fmt, va_list ap);
 
 void __attribute__((format(printf, 2, 3))) ast_child_verbose(int level, const char *fmt, ...);
-
-int ast_register_verbose(void (*verboser)(const char *string)) attribute_warn_unused_result;
-int ast_unregister_verbose(void (*verboser)(const char *string)) attribute_warn_unused_result;
 
 /*
  * These gymnastics are due to platforms which designate char as unsigned by
@@ -227,9 +226,9 @@ void ast_console_toggle_mute(int fd, int silent);
 
 /*!
  * \brief enables or disables logging of a specified level to the console
- * fd specifies the index of the console receiving the level change
- * level specifies the index of the logging level being toggled
- * state indicates whether logging will be on or off (0 for off, 1 for on)
+ * \param fd specifies the index of the console receiving the level change
+ * \param level specifies the index of the logging level being toggled
+ * \param state indicates whether logging will be on or off (0 for off, 1 for on)
  */
 void ast_console_toggle_loglevel(int fd, int level, int state);
 
@@ -368,7 +367,7 @@ const char *ast_logger_get_dateformat(void);
 ast_callid ast_create_callid(void);
 
 /*!
- * \brief extracts the callerid from the thread
+ * \brief extracts the callid from the thread
  *
  * \retval Non-zero Call id related to the thread
  * \retval 0 if no call_id is present in the thread
@@ -900,7 +899,7 @@ unsigned long _ast_trace_dec_indent(void);
 	__type __var; \
 	ast_trace(level, "--> Calling %s\n", #__funcname); \
 	__var = __funcname(__VA_ARGS__); \
-	ast_trace(level, "<-- Return from %s\n", #__funcname) \
+	ast_trace(level, "<-- Return from %s\n", #__funcname); \
 	__var; \
 })
 
@@ -1018,7 +1017,7 @@ unsigned long _ast_trace_dec_indent(void);
 	__funcname(__VA_ARGS__)
 
 #define SCOPE_CALL_WITH_RESULT(level, __var, __funcname, ...) \
-	__var = __funcname(__VA_ARGS__)
+	__funcname(__VA_ARGS__)
 
 #define SCOPE_CALL_WITH_INT_RESULT(level, __funcname, ...) \
 	__funcname(__VA_ARGS__)

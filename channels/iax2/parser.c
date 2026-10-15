@@ -812,7 +812,8 @@ int iax_parse_ies(struct iax_ies *ies, unsigned char *data, int datalen)
 		ie = data[0];
 		len = data[1];
 		if (len > datalen - 2) {
-			errorf("Information element length exceeds message size\n");
+			snprintf(tmp, sizeof(tmp), "Information element length %d exceeds message size %d\n", len, datalen - 2);
+			errorf(tmp);
 			return -1;
 		}
 		switch(ie) {
@@ -1209,6 +1210,7 @@ void iax_frame_wrap(struct iax_frame *fr, struct ast_frame *f)
 	if (fr->af.datalen) {
 		size_t copy_len = fr->af.datalen;
 		if (copy_len > fr->afdatalen) {
+			ast_assert(fr->af.datalen >= 0); /* Length should never be negative */
 			ast_log(LOG_ERROR, "Losing frame data because destination buffer size '%d' bytes not big enough for '%d' bytes in the frame\n",
 				(int) fr->afdatalen, (int) fr->af.datalen);
 			copy_len = fr->afdatalen;
@@ -1228,6 +1230,8 @@ void iax_frame_wrap(struct iax_frame *fr, struct ast_frame *f)
 struct iax_frame *iax_frame_new(int direction, int datalen, unsigned int cacheable)
 {
 	struct iax_frame *fr;
+
+	ast_assert(datalen >= 0); /* Length should never be negative */
 
 #if !defined(NO_FRAME_CACHE)
 	if (cacheable) {

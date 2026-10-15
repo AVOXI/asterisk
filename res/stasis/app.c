@@ -402,17 +402,30 @@ static struct ast_json *channel_destroyed_event(
 	const struct timeval *tv)
 {
 	struct ast_json *json_channel = ast_channel_snapshot_to_json(snapshot, stasis_app_get_sanitizer());
+	struct ast_json *blob;
 
 	if (!json_channel) {
 		return NULL;
 	}
 
-	return ast_json_pack("{s: s, s: o, s: i, s: s, s: o}",
+	blob = ast_json_pack("{s: s, s: o, s: i, s: s}",
 		"type", "ChannelDestroyed",
 		"timestamp", ast_json_timeval(*tv, NULL),
 		"cause", snapshot->hangup->cause,
-		"cause_txt", ast_cause2str(snapshot->hangup->cause),
-		"channel", json_channel);
+		"cause_txt", ast_cause2str(snapshot->hangup->cause));
+
+	if (!blob) {
+		return NULL;
+	}
+
+	if (snapshot->hangup->tech_cause) {
+		ast_json_object_set(blob, "tech_cause",
+			ast_json_integer_create(snapshot->hangup->tech_cause));
+	}
+
+	ast_json_object_set(blob, "channel", json_channel);
+
+	return blob;
 }
 
 static struct ast_json *channel_state_change_event(
@@ -422,21 +435,25 @@ static struct ast_json *channel_state_change_event(
 	return simple_channel_event("ChannelStateChange", snapshot, tv);
 }
 
-/*! \brief Handle channel state changes */
+/*!
+*\brief Handle channel state changes 
+*
+*\note For channel snapshot updates, new_snapshot is guaranteed to be
+*	   non-NULL. A channel going away is indicated by AST_FLAG_DEAD
+*	   on the new snapshot. See stasis_channels.h for the invariant.
+*/
 static struct ast_json *channel_state(
 	struct ast_channel_snapshot *old_snapshot,
 	struct ast_channel_snapshot *new_snapshot,
 	const struct timeval *tv)
 {
-	struct ast_channel_snapshot *snapshot = new_snapshot ?
-		new_snapshot : old_snapshot;
 
 	if (!old_snapshot) {
-		return channel_created_event(snapshot, tv);
+		return channel_created_event(new_snapshot, tv);
 	} else if (ast_test_flag(&new_snapshot->flags, AST_FLAG_DEAD)) {
-		return channel_destroyed_event(snapshot, tv);
+		return channel_destroyed_event(new_snapshot, tv);
 	} else if (old_snapshot->state != new_snapshot->state) {
-		return channel_state_change_event(snapshot, tv);
+		return channel_state_change_event(new_snapshot, tv);
 	}
 
 	return NULL;

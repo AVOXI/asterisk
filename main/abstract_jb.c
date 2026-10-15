@@ -966,7 +966,7 @@ static struct ast_frame *hook_event_cb(struct ast_channel *chan, struct ast_fram
 		return frame;
 	}
 
-	if (ast_channel_fdno(chan) == AST_JITTERBUFFER_FD && framedata->timer) {
+	if (ast_channel_fdno(chan) == AST_JITTERBUFFER_FD) {
 		if (ast_timer_ack(framedata->timer, 1) < 0) {
 			ast_log(LOG_ERROR, "Failed to acknowledge timer in jitter buffer\n");
 			return frame;
@@ -1284,6 +1284,7 @@ void ast_jb_create_framehook(struct ast_channel *chan, struct ast_jb_conf *jb_co
 			ast_framehook_detach(chan, *id);
 			ast_channel_datastore_remove(chan, datastore);
 			ast_datastore_free(datastore);
+			ast_channel_set_fd(chan, AST_JITTERBUFFER_FD, -1);
 		}
 		ast_channel_unlock(chan);
 		return;

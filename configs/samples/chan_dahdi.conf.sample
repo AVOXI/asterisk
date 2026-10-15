@@ -570,6 +570,9 @@ context=public
 ;
 ; Whether or not to use caller ID:
 ;
+; On FXO ports, this enables detecting Caller ID on the incoming phone call.
+; On FXS ports, this enables sending a Caller ID spill to CPE.
+;
 usecallerid=yes
 ;
 ; NOTE: If the CALL_QUALIFIER variable on the channel is set to 1,
@@ -595,7 +598,6 @@ usecallerid=yes
 ;     polarity    = polarity reversal signals the start
 ;     polarity_IN = polarity reversal signals the start, for India,
 ;                   for dtmf dialtone detection; using DTMF.
-; (see https://wiki.asterisk.org/wiki/display/AST/Caller+ID+in+India)
 ;     dtmf        = causes monitor loop to look for dtmf energy on the
 ;                   incoming channel to initate cid acquisition
 ;
@@ -684,6 +686,31 @@ usecallerid=yes
 ; app will not return the "BUSY" result for extensions.
 ;
 callwaiting=yes
+;
+; Whether or not to allow for Call Waiting Deluxe options to be used.
+; The Call Waiting Deluxe options are:
+;  3: Conference - conference the call waiting call with the existing call
+;  7: Drop - drop current call and switch to new (same as hanging up and answering)
+;  6/8: Announcement - play announcement to call waiting caller telling them to hold
+;  9: Forward - forward the call waiting call to a preconfigured extension
+; Doing nothing after 1 second triggers default behavior of holding the current call
+;  and switching to the new one.
+;
+; Some CPE (Caller ID units, screenphones, etc.) have dedicated buttons for utilizing
+; the Call Waiting Deluxe features, but these can also be used from any phone manually
+; by simply hook flashing as usual and then quickly dialing the appropriate DTMF digit.
+; If no digit is received within 1 second, the default action is assumed,
+; as if Call Waiting Deluxe was not used.
+;
+; The following extensions are also available in the dialplan to utilize this functionality:
+; - The CALLWAITDELUXEANNOUNCEMENT variable can be set on the incoming channel to control the
+;   announcement prompt played to the call waiting caller. Default is "one-moment-please".
+; - If the forward option is used, the call waiting channel will be forwarded to the 'f' extension
+;   in the channel's configured context. You can then use any dialplan mechanism to route the call.
+;
+; Default is 'no'.
+;
+;callwaitingdeluxe=yes
 ;
 ; Configure the number of outstanding call waiting calls for internal ISDN
 ; endpoints before bouncing the calls as busy.  This option is equivalent to
@@ -814,6 +841,11 @@ cancallforward=yes
 ; catch this first)
 ;
 callreturn=yes
+;
+; Whether or not to allow redialing the last number called using Last Number Redial
+; (##, if your dialplan doesn't catch this first)
+;
+;lastnumredial=yes
 ;
 ; Stutter dialtone support: If voicemail is received in the mailbox then
 ; taking the phone off hook will cause a stutter dialtone instead of a
@@ -948,8 +980,8 @@ group=1
 ; If you need to pick up an FXS signalled channel directly, you can have it
 ; dial a Local channel and pick up the ;1 side of the Local channel instead.
 ;
-callgroup=1
-pickupgroup=1
+;callgroup=1
+;pickupgroup=1
 ;
 ; Named ring groups (a.k.a. named call groups) and named pickup groups.
 ; If a phone is ringing and it is a member of a group which is one of your

@@ -228,7 +228,6 @@ static int dtls_mtu = DEFAULT_DTLS_MTU;
 #ifdef HAVE_PJPROJECT
 static int icesupport = DEFAULT_ICESUPPORT;
 static int stun_software_attribute = DEFAULT_STUN_SOFTWARE_ATTRIBUTE;
-static struct sockaddr_in stunaddr;
 static pj_str_t turnaddr;
 static int turnport = DEFAULT_TURN_PORT;
 static pj_str_t turnusername;
@@ -244,9 +243,16 @@ static ast_rwlock_t ice_acl_lock = AST_RWLOCK_INIT_VALUE;
 static struct ast_acl_list *stun_acl = NULL;
 static ast_rwlock_t stun_acl_lock = AST_RWLOCK_INIT_VALUE;
 
+static struct sockaddr_in stunaddr;
 /*! stunaddr recurring resolution */
 static ast_rwlock_t stunaddr_lock = AST_RWLOCK_INIT_VALUE;
 static struct ast_dns_query_recurring *stunaddr_resolver = NULL;
+/*! TTL from last successful query */
+static int stunaddr_ttl = 0;
+/*! The current hostname if stunaddr isn't an IP address */
+static char *stun_hostname = NULL;
+/*! Re-resolve hostname if TTL = 0? */
+static int stunaddr_reresolve_ttl_0 = 0;
 
 /*! \brief Pool factory used by pjlib to allocate memory. */
 static pj_caching_pool cachingpool;
@@ -495,11 +501,11 @@ struct ast_rtp {
 
 	struct ast_rtp_ioqueue_thread *ioqueue; /*!< The ioqueue thread handling us */
 
-	char remote_ufrag[256];  /*!< The remote ICE username */
-	char remote_passwd[256]; /*!< The remote ICE password */
+	char remote_ufrag[257];  /*!< The remote ICE username */
+	char remote_passwd[257]; /*!< The remote ICE password */
 
-	char local_ufrag[256];  /*!< The local ICE username */
-	char local_passwd[256]; /*!< The local ICE password */
+	char local_ufrag[257];  /*!< The local ICE username */
+	char local_passwd[257]; /*!< The local ICE password */
 
 	struct ao2_container *ice_local_candidates;           /*!< The local ICE candidates */
 	struct ao2_container *ice_active_remote_candidates;   /*!< The remote ICE candidates */
@@ -623,7 +629,6 @@ struct rtp_red {
 	unsigned char len[AST_RED_MAX_GENERATION]; /*!< length of each generation */
 	int num_gen; /*!< Number of generations */
 	int schedid; /*!< Timer id */
-	int ti; /*!< How long to buffer data before send */
 	unsigned char t140red_data[64000];
 	unsigned char buf_data[64000]; /*!< buffered primary data */
 	int hdrlen;
@@ -698,7 +703,7 @@ static int __rtp_sendto(struct ast_rtp_instance *instance, void *buf, size_t siz
 
 #ifdef HAVE_PJPROJECT
 static void stunaddr_resolve_callback(const struct ast_dns_query *query);
-static int store_stunaddr_resolved(const struct ast_dns_query *query);
+static int store_stunaddr_resolved(const char *name, const struct ast_dns_result *result, int lock);
 #endif
 
 #if defined(HAVE_OPENSSL) && (OPENSSL_VERSION_NUMBER >= 0x10001000L) && !defined(OPENSSL_NO_SRTP)
@@ -1538,6 +1543,7 @@ static void rtp_ioqueue_thread_destroy(struct ast_rtp_ioqueue_thread *ioqueue)
 		pj_pool_t *temp_pool = ioqueue->pool;
 
 		ioqueue->pool = NULL;
+		pj_ioqueue_destroy(ioqueue->ioqueue);
 		pj_pool_release(temp_pool);
 	}
 
@@ -2861,76 +2867,137 @@ static inline int rtcp_debug_test_addr(struct ast_sockaddr *addr)
 }
 
 #if defined(HAVE_OPENSSL) && (OPENSSL_VERSION_NUMBER >= 0x10001000L) && !defined(OPENSSL_NO_SRTP)
-/*! \pre instance is locked */
-static int dtls_srtp_handle_timeout(struct ast_rtp_instance *instance, int rtcp)
+/*!
+ * \brief Handles DTLS timer expiration
+ *
+ * \param instance
+ * \param timeout
+ * \param rtcp
+ *
+ * If DTLSv1_get_timeout() returns 0, it's an error or no timeout was set.
+ * We need to unref instance and stop the timer in this case.  Otherwise,
+ * new timeout may be a number of milliseconds or 0.  If it's 0, OpenSSL
+ * is telling us to call DTLSv1_handle_timeout() immediately so we'll set
+ * timeout to 1ms so we get rescheduled almost immediately.
+ *
+ * \retval  0 - success
+ * \retval -1 - failure
+ */
+static int dtls_srtp_handle_timeout(struct ast_rtp_instance *instance, int *timeout, int rtcp)
 {
 	struct ast_rtp *rtp = ast_rtp_instance_get_data(instance);
 	struct dtls_details *dtls = !rtcp ? &rtp->dtls : &rtp->rtcp->dtls;
 	struct timeval dtls_timeout;
+	int res = 0;
 
-	ast_debug_dtls(3, "(%p) DTLS srtp - handle timeout - rtcp=%d\n", instance, rtcp);
-	DTLSv1_handle_timeout(dtls->ssl);
+	res = DTLSv1_handle_timeout(dtls->ssl);
+	ast_debug_dtls(3, "(%p) DTLS srtp - handle timeout - rtcp=%d result: %d\n", instance, rtcp, res);
 
 	/* If a timeout can't be retrieved then this recurring scheduled item must stop */
-	if (!DTLSv1_get_timeout(dtls->ssl, &dtls_timeout)) {
+	res = DTLSv1_get_timeout(dtls->ssl, &dtls_timeout);
+	if (!res) {
+		/* Make sure we don't try to stop the timer later if it's already been stopped */
 		dtls->timeout_timer = -1;
-		return 0;
+		ao2_ref(instance, -1);
+		*timeout = 0;
+		ast_debug_dtls(3, "(%p) DTLS srtp - handle timeout - rtcp=%d get timeout failure\n", instance, rtcp);
+		return -1;
 	}
+	*timeout = dtls_timeout.tv_sec * 1000 + dtls_timeout.tv_usec / 1000;
+	if (*timeout == 0) {
+		/*
+		 * If DTLSv1_get_timeout() succeeded with a timeout of 0, OpenSSL
+		 * is telling us to call DTLSv1_handle_timeout() again now HOWEVER...
+		 * Do NOT be tempted to call DTLSv1_handle_timeout() and
+		 * DTLSv1_get_timeout() in a loop while the timeout is 0.  There is only
+		 * 1 thread running the scheduler for all PJSIP related RTP instances
+		 * so we don't want to delay here any more than necessary.  It's also
+		 * possible that an OpenSSL bug or change in behavior could cause
+		 * DTLSv1_get_timeout() to return 0 forever.  If that happens, we'll
+		 * be stuck here and no other RTP instances will get serviced.
+		 * This RTP instance is also locked while this callback runs so we
+		 * don't want to delay other threads that may need to lock this
+		 * RTP instance for their own purpose.
+		 *
+		 * Just set the timeout to 1ms and let the scheduler reschedule us
+		 * as quickly as possible.
+		 */
+		*timeout = 1;
+	}
+	ast_debug_dtls(3, "(%p) DTLS srtp - handle timeout - rtcp=%d timeout=%d\n", instance, rtcp, *timeout);
 
-	return dtls_timeout.tv_sec * 1000 + dtls_timeout.tv_usec / 1000;
+	return 0;
 }
 
 /* Scheduler callback */
 static int dtls_srtp_handle_rtp_timeout(const void *data)
 {
 	struct ast_rtp_instance *instance = (struct ast_rtp_instance *)data;
-	int reschedule;
+	int timeout = 0;
+	int res = 0;
 
 	ao2_lock(instance);
-	reschedule = dtls_srtp_handle_timeout(instance, 0);
+	res = dtls_srtp_handle_timeout(instance, &timeout, 0);
 	ao2_unlock(instance);
-	if (!reschedule) {
-		ao2_ref(instance, -1);
+	if (res < 0) {
+		/* Tells the scheduler to stop rescheduling */
+		return 0;
 	}
 
-	return reschedule;
+	/* Reschedule based on the timeout value */
+	return timeout;
 }
 
 /* Scheduler callback */
 static int dtls_srtp_handle_rtcp_timeout(const void *data)
 {
 	struct ast_rtp_instance *instance = (struct ast_rtp_instance *)data;
-	int reschedule;
+	int timeout = 0;
+	int res = 0;
 
 	ao2_lock(instance);
-	reschedule = dtls_srtp_handle_timeout(instance, 1);
+	res = dtls_srtp_handle_timeout(instance, &timeout, 1);
 	ao2_unlock(instance);
-	if (!reschedule) {
-		ao2_ref(instance, -1);
+	if (res < 0) {
+		/* Tells the scheduler to stop rescheduling */
+		return 0;
 	}
 
-	return reschedule;
+	/* Reschedule based on the timeout value */
+	return timeout;
 }
 
 static void dtls_srtp_start_timeout_timer(struct ast_rtp_instance *instance, struct ast_rtp *rtp, int rtcp)
 {
 	struct dtls_details *dtls = !rtcp ? &rtp->dtls : &rtp->rtcp->dtls;
+	ast_sched_cb cb = !rtcp ? dtls_srtp_handle_rtp_timeout : dtls_srtp_handle_rtcp_timeout;
 	struct timeval dtls_timeout;
+	int res = 0;
+	int timeout = 0;
 
-	if (DTLSv1_get_timeout(dtls->ssl, &dtls_timeout)) {
-		int timeout = dtls_timeout.tv_sec * 1000 + dtls_timeout.tv_usec / 1000;
+	ast_assert(dtls->timeout_timer == -1);
 
-		ast_assert(dtls->timeout_timer == -1);
+	res = DTLSv1_get_timeout(dtls->ssl, &dtls_timeout);
+	if (res == 0) {
+		ast_debug_dtls(3, "(%p) DTLS srtp - DTLSv1_get_timeout return an error or there was no timeout set for %s\n",
+			instance, rtcp ? "RTCP" : "RTP");
+		return;
+	}
 
-		ao2_ref(instance, +1);
-		if ((dtls->timeout_timer = ast_sched_add(rtp->sched, timeout,
-			!rtcp ? dtls_srtp_handle_rtp_timeout : dtls_srtp_handle_rtcp_timeout, instance)) < 0) {
-			ao2_ref(instance, -1);
-			ast_log(LOG_WARNING, "Scheduling '%s' DTLS retransmission for RTP instance [%p] failed.\n",
-				!rtcp ? "RTP" : "RTCP", instance);
-		} else {
-			ast_debug_dtls(3, "(%p) DTLS srtp - scheduled timeout timer for '%d'\n", instance, timeout);
-		}
+	timeout = dtls_timeout.tv_sec * 1000 + dtls_timeout.tv_usec / 1000;
+
+	ao2_ref(instance, +1);
+	/*
+	 * We want the timer to fire again based on calling DTLSv1_get_timeout()
+	 * inside the callback, not at a fixed interval.
+	 */
+	if ((dtls->timeout_timer = ast_sched_add_variable(rtp->sched, timeout, cb, instance, 1)) < 0) {
+		ao2_ref(instance, -1);
+		ast_log(LOG_WARNING, "Scheduling '%s' DTLS retransmission for RTP instance [%p] failed.\n",
+			!rtcp ? "RTP" : "RTCP", instance);
+	} else {
+		ast_debug_dtls(3, "(%p) DTLS srtp - scheduled timeout timer for '%d' %s\n",
+			instance, timeout, rtcp ? "RTCP" : "RTP");
 	}
 }
 
@@ -3207,6 +3274,18 @@ static int __rtp_recvfrom(struct ast_rtp_instance *instance, void *buf, size_t s
 
 		ast_debug_dtls(3, "(%p) DTLS - __rtp_recvfrom rtp=%p - Got SSL packet '%d'\n", instance, rtp, *in);
 
+#ifdef HAVE_PJPROJECT
+		/* If this packet arrived via TURN/ICE loopback re-injection,
+		 * substitute the real remote address before the candidate check
+		 * otherwise the DTLS check will see 127.0.0.1 and drop the packet.
+		 */
+		if (!ast_sockaddr_isnull(&rtp->rtp_loop) && !ast_sockaddr_cmp(&rtp->rtp_loop, sa)) {
+			ast_rtp_instance_get_remote_address(instance, sa);
+		} else if (rtcp && !ast_sockaddr_isnull(&rtp->rtcp_loop) && !ast_sockaddr_cmp(&rtp->rtcp_loop, sa)) {
+			ast_sockaddr_copy(sa, &rtp->rtcp->them);
+		}
+#endif
+
 		/*
 		 * If ICE is in use, we can prevent a possible DOS attack
 		 * by allowing DTLS protocol messages (client hello, etc)
@@ -3391,6 +3470,16 @@ static int __rtp_sendto(struct ast_rtp_instance *instance, void *buf, size_t siz
 	struct ast_rtp *transport_rtp = ast_rtp_instance_get_data(transport);
 	struct ast_srtp *srtp = ast_rtp_instance_get_srtp(transport, rtcp);
 	int res;
+#if defined(HAVE_OPENSSL) && (OPENSSL_VERSION_NUMBER >= 0x10001000L) && !defined(OPENSSL_NO_SRTP)
+	char *out = buf;
+	struct dtls_details *dtls = (!rtcp || rtp->rtcp->type == AST_RTP_INSTANCE_RTCP_MUX) ? &rtp->dtls : &rtp->rtcp->dtls;
+
+	/* Don't send RTP if DTLS hasn't finished yet */
+	if (dtls->ssl && ((*out < 20) || (*out > 63)) && dtls->connection == AST_RTP_DTLS_CONNECTION_NEW) {
+		*via_ice = 0;
+		return 0;
+	}
+#endif
 
 	*via_ice = 0;
 
@@ -3495,9 +3584,13 @@ static void calc_mean_and_standard_deviation(double new_sample, double *mean, do
 	*std_dev = sqrt((last_sum_of_squares + (delta1 * delta2)) / *count);
 }
 
-static int create_new_socket(const char *type, int af)
+static int create_new_socket(const char *type, struct ast_sockaddr *bind_addr)
 {
-	int sock = ast_socket_nonblock(af, SOCK_DGRAM, 0);
+	int af, sock;
+
+	af = ast_sockaddr_is_ipv4(bind_addr) ? AF_INET  :
+	     ast_sockaddr_is_ipv6(bind_addr) ? AF_INET6 : -1;
+	sock = ast_socket_nonblock(af, SOCK_DGRAM, 0);
 
 	if (sock < 0) {
 		ast_log(LOG_WARNING, "Unable to allocate %s socket: %s\n", type, strerror(errno));
@@ -3507,6 +3600,15 @@ static int create_new_socket(const char *type, int af)
 #ifdef SO_NO_CHECK
 	if (nochecksums) {
 		setsockopt(sock, SOL_SOCKET, SO_NO_CHECK, &nochecksums, sizeof(nochecksums));
+	}
+#endif
+
+#ifdef HAVE_SOCK_IPV6_V6ONLY
+	if (AF_INET6 == af && ast_sockaddr_is_any(bind_addr)) {
+		/* ICE relies on dual-stack behavior. Ensure it is enabled. */
+		if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &(int){0}, sizeof(int)) != 0) {
+			ast_log(LOG_WARNING, "setsockopt IPV6_V6ONLY=0 failed: %s\n", strerror(errno));
+		}
 	}
 #endif
 
@@ -3663,6 +3765,8 @@ static void rtp_add_candidates_to_ice(struct ast_rtp_instance *instance, struct 
 	struct ast_ice_host_candidate *candidate;
 	int af_inet_ok = 0, af_inet6_ok = 0;
 	struct sockaddr_in stunaddr_copy;
+	int stunaddr_ttl_copy = 0;
+	char *stun_hostname_copy = NULL;
 
 	if (ast_sockaddr_is_ipv4(addr)) {
 		af_inet_ok = 1;
@@ -3772,27 +3876,97 @@ static void rtp_add_candidates_to_ice(struct ast_rtp_instance *instance, struct 
 		freeifaddrs(ifa);
 	}
 
+	/*
+	 * Snap copies of the stun info with the stunaddr_lock held because
+	 * recurring DNS lookup could be happening in another thread.
+	 */
 	ast_rwlock_rdlock(&stunaddr_lock);
 	memcpy(&stunaddr_copy, &stunaddr, sizeof(stunaddr));
+	stunaddr_ttl_copy = stunaddr_ttl;
+	stun_hostname_copy = ast_strdupa(S_OR(stun_hostname, ""));
 	ast_rwlock_unlock(&stunaddr_lock);
 
 	/* If configured to use a STUN server to get our external mapped address do so */
-	if (stunaddr_copy.sin_addr.s_addr && !stun_address_is_blacklisted(addr) &&
+	if ( (!ast_strlen_zero(stun_hostname_copy) || stunaddr_copy.sin_addr.s_addr)
+		&& !stun_address_is_blacklisted(addr) &&
 		(ast_sockaddr_is_ipv4(addr) || ast_sockaddr_is_any(addr)) &&
 		count < PJ_ICE_MAX_CAND) {
 		struct sockaddr_in answer;
 		int rsp;
 
-		ast_debug_category(3, AST_DEBUG_CATEGORY_ICE | AST_DEBUG_CATEGORY_STUN,
+		ast_debug_category(2, AST_DEBUG_CATEGORY_ICE | AST_DEBUG_CATEGORY_STUN,
 			"(%p) ICE request STUN %s %s candidate\n", instance,
 			transport == AST_TRANSPORT_UDP ? "UDP" : "TCP",
 			component == AST_RTP_ICE_COMPONENT_RTP ? "RTP" : "RTCP");
 
 		/*
 		 * The instance should not be locked because we can block
-		 * waiting for a STUN respone.
+		 * waiting for stunaddr_lock and/or a STUN respone.
 		 */
 		ao2_unlock(instance);
+
+		/*
+		 * If stunaddr_ttl is 0 and stun_hostname is set, then "stunaddr" was set to a
+		 * hostname in rtp.conf but the last attempt at resolution returned a TTL = 0
+		 * (don't cache) and periodic resolution was cancelled. Theoretically, as long
+		 * as TTL = 0, we should do a synchronous lookup before every use of the address
+		 * but historically (and incorrectly), we just kept on using the cached result
+		 * forever.
+		 *
+		 * Now, if the "stunaddr_reresolve_ttl_0" parameter in rtp.conf set set to yes,
+		 * we'll use the cached value for the current call setup (because we don't
+		 * want to hold up the call for a synchronous DNS lookup) but restart periodic
+		 * resolution.  It's not obvious but restarting periodic resolution actually
+		 * just triggers an asynchronous lookup which calls our stunaddr_resolve_callback
+		 * then reschedules itself if the result has a TTL > 0.
+		 *
+		 * The bottom line is that it's not really an issue if THIS call setup attempt
+		 * uses a stale cached entry if TTL = 0 as long as we trigger a re-resolution
+		 * fairly quickly and keep doing it as long as TTL = 0.
+		 *
+		 */
+		ast_debug_stun(2, "Checking stunaddr_reresolve_ttl_0: %s TTL: %d Host: %s resolver: %p\n",
+			AST_CLI_YESNO(stunaddr_reresolve_ttl_0), stunaddr_ttl_copy, stun_hostname_copy,
+			stunaddr_resolver);
+
+		if (stunaddr_reresolve_ttl_0 && stunaddr_ttl_copy == 0
+			&& !ast_strlen_zero(stun_hostname_copy) && !stunaddr_resolver) {
+
+			/*
+			 * We need the write lock becausae we might be setting stunaddr_resolver.
+			 */
+			ast_rwlock_wrlock(&stunaddr_lock);
+
+			/*
+			 * Now that we have the write lock, check whether we still need to resolve.
+			 * It's possible that another thread got here first.  It's also possible that
+			 * a reload changed the "stunaddr" parameter to an IP address (which clears
+			 * stun_hostname) so we don't need resolution at all any more.
+			 */
+			if (stunaddr_ttl == 0 && !ast_strlen_zero(stun_hostname) && !stunaddr_resolver) {
+				ast_debug_stun(2, "Restarting recurring resolution for stun server '%s'\n",
+					stun_hostname);
+				/*
+				 * This will return immediately after triggering an async lookup
+				 * and scheduling the next lookup.  stunaddr_resolve_callback will be
+				 * called from another thread.
+				 */
+				stunaddr_resolver = ast_dns_resolve_recurring(stun_hostname, T_A, C_IN,
+					&stunaddr_resolve_callback, NULL);
+				if (!stunaddr_resolver) {
+					ast_log(LOG_ERROR, "Failed to setup recurring DNS resolution of stunaddr '%s'",
+						stun_hostname);
+				}
+			} else {
+				ast_debug_stun(2, "stun TTL: %d H: %s. Re-resolution skipped because another thread took care of it.\n",
+					stunaddr_ttl, stun_hostname);
+			}
+
+			ast_rwlock_unlock(&stunaddr_lock);
+		} else {
+			ast_debug_stun(2, "stun TTL: %d H: %s. Re-resolution not needed or disabled.\n", stunaddr_ttl, stun_hostname);
+		}
+
 		rsp = ast_stun_request(component == AST_RTP_ICE_COMPONENT_RTCP
 			? rtp->rtcp->s : rtp->s, &stunaddr_copy, NULL, &answer);
 		ao2_lock(instance);
@@ -3967,26 +4141,35 @@ static int ice_create(struct ast_rtp_instance *instance, struct ast_sockaddr *ad
 static int rtp_allocate_transport(struct ast_rtp_instance *instance, struct ast_rtp *rtp)
 {
 	int x, startplace, i, maxloops;
+	unsigned int port_start, port_end;
 
 	rtp->strict_rtp_state = (strictrtp ? STRICT_RTP_CLOSED : STRICT_RTP_OPEN);
 
+	/* Determine the port range to use: per-instance override or global */
+	port_start = ast_rtp_instance_get_port_start(instance);
+	port_end = ast_rtp_instance_get_port_end(instance);
+	if (port_start > 0 && port_end > 0 && port_end > port_start) {
+		ast_debug_rtp(1, "(%p) RTP using per-instance port range %d-%d\n",
+			instance, port_start, port_end);
+	} else {
+		port_start = rtpstart;
+		port_end = rtpend;
+	}
+
 	/* Create a new socket for us to listen on and use */
-	if ((rtp->s =
-	     create_new_socket("RTP",
-			       ast_sockaddr_is_ipv4(&rtp->bind_address) ? AF_INET  :
-			       ast_sockaddr_is_ipv6(&rtp->bind_address) ? AF_INET6 : -1)) < 0) {
+	if ((rtp->s = create_new_socket("RTP", &rtp->bind_address)) < 0) {
 		ast_log(LOG_WARNING, "Failed to create a new socket for RTP instance '%p'\n", instance);
 		return -1;
 	}
 
 	/* Now actually find a free RTP port to use */
-	x = (ast_random() % (rtpend - rtpstart)) + rtpstart;
+	x = (ast_random() % (port_end - port_start)) + port_start;
 	x = x & ~1;
 	startplace = x;
 
 	/* Protection against infinite loops in the case there is a potential case where the loop is not broken such as an odd
 	   start port sneaking in (even though this condition is checked at load.) */
-	maxloops = rtpend - rtpstart;
+	maxloops = port_end - port_start;
 	for (i = 0; i <= maxloops; i++) {
 		ast_sockaddr_set_port(&rtp->bind_address, x);
 		/* Try to bind, this will tell us whether the port is available or not */
@@ -3998,8 +4181,8 @@ static int rtp_allocate_transport(struct ast_rtp_instance *instance, struct ast_
 		}
 
 		x += 2;
-		if (x > rtpend) {
-			x = (rtpstart + 1) & ~1;
+		if (x > port_end) {
+			x = (port_start + 1) & ~1;
 		}
 
 		/* See if we ran out of ports or if the bind actually failed because of something other than the address being in use */
@@ -4150,7 +4333,7 @@ static int ast_rtp_new(struct ast_rtp_instance *instance,
 	/* Set default parameters on the newly created RTP structure */
 	rtp->ssrc = ast_random();
 	ast_uuid_generate_str(rtp->cname, sizeof(rtp->cname));
-	rtp->seqno = ast_random() & 0x7fff;
+	rtp->seqno = ast_random() & 0xffff;
 	rtp->expectedrxseqno = -1;
 	rtp->expectedseqno = -1;
 	rtp->rxstart = -1;
@@ -4283,8 +4466,7 @@ static int ast_rtp_dtmf_begin(struct ast_rtp_instance *instance, char digit)
 {
 	struct ast_rtp *rtp = ast_rtp_instance_get_data(instance);
 	struct ast_sockaddr remote_address = { {0,} };
-	int hdrlen = 12, res = 0, i = 0, payload = 101;
-	unsigned int sample_rate = 8000;
+	int hdrlen = 12, res = 0, i = 0, payload = -1, sample_rate = -1;
 	char data[256];
 	unsigned int *rtpheader = (unsigned int*)data;
 	RAII_VAR(struct ast_format *, payload_format, NULL, ao2_cleanup);
@@ -4312,27 +4494,41 @@ static int ast_rtp_dtmf_begin(struct ast_rtp_instance *instance, char digit)
 		return -1;
 	}
 
+
+	/* g722 is a 16K codec that masquerades as an 8K codec within RTP. ast_rtp_get_rate was written specifically to
+	   handle this. If we use the actual sample rate of g722 in this scenario and there is a 16K telephone-event on
+	   offer, we will end up using that instead of the 8K rate telephone-event that is expected with g722. */
 	if (rtp->lasttxformat == ast_format_none) {
 		/* No audio frames have been written yet so we have to lookup both the preferred payload type and bitrate. */
 		payload_format = ast_rtp_codecs_get_preferred_format(ast_rtp_instance_get_codecs(instance));
 		if (payload_format) {
 			/* If we have a preferred type, use that. Otherwise default to 8K. */
-			sample_rate = ast_format_get_sample_rate(payload_format);
+			sample_rate = ast_rtp_get_rate(payload_format);
 		}
 	} else {
-		sample_rate = ast_format_get_sample_rate(rtp->lasttxformat);
+		sample_rate = ast_rtp_get_rate(rtp->lasttxformat);
 	}
 
-	/* Grab the matching DTMF type payload */
-	payload = ast_rtp_codecs_payload_code_tx_sample_rate(ast_rtp_instance_get_codecs(instance), 0, NULL, AST_RTP_DTMF, sample_rate);
+	if (sample_rate != -1) {
+		payload = ast_rtp_codecs_payload_code_tx_sample_rate(ast_rtp_instance_get_codecs(instance), 0, NULL, AST_RTP_DTMF, sample_rate);
+	}
 
-	/* If this returns -1, we are using a codec with a sample rate that does not have a matching RFC 2833/4733
-	   offer. The offer may have included a default-rate one that doesn't match the codec rate, so try to use that. */
-	if (payload == -1) {
+	if (payload == -1 ||
+		!ast_rtp_payload_mapping_tx_is_present(
+			ast_rtp_instance_get_codecs(instance), ast_rtp_codecs_get_payload(ast_rtp_instance_get_codecs(instance), payload))) {
+		/* Fall back to the preferred DTMF payload type and sample rate as either we couldn't find an audio codec to try and match
+		   sample rates with or we could, but a telephone-event matching that audio codec's sample rate was not included in the
+		   sdp negotiated by the far end. */
+		payload = ast_rtp_codecs_get_preferred_dtmf_format_pt(ast_rtp_instance_get_codecs(instance));
+		sample_rate = ast_rtp_codecs_get_preferred_dtmf_format_rate(ast_rtp_instance_get_codecs(instance));
+	}
+
+	/* The sdp negotiation has not yeilded a usable RFC 2833/4733 format. Try a default-rate one as a last resort. */
+	if (payload == -1 || sample_rate == -1) {
 		sample_rate = DEFAULT_DTMF_SAMPLE_RATE_MS;
 		payload = ast_rtp_codecs_payload_code_tx(ast_rtp_instance_get_codecs(instance), 0, NULL, AST_RTP_DTMF);
 	}
-	/* No default-rate offer either, trying to send a digit outside of what was negotiated for. */
+	/* Even trying a default payload has failed. We are trying to send a digit outside of what was negotiated for. */
 	if (payload == -1) {
 		return -1;
 	}
@@ -5321,6 +5517,17 @@ static struct ast_frame *red_t140_to_red(struct rtp_red *red)
 	/* Store length of each generation and primary data length*/
 	for (i = 0; i < red->num_gen; i++)
 		red->len[i] = red->len[i+1];
+
+	/*
+	 * RED generation payload sizes are limited to 255 (UCHAR_MAX) bytes by virtue of
+	 * red->len being an array of usigned chars.  If the new primary payload exceeds that,
+	 * we're going to truncate it to 255.
+	 */
+	if (red->t140.datalen > UCHAR_MAX) {
+		ast_log(LOG_WARNING, "New T.140 frame of %d bytes exceeds max of %u. Discarding %d bytes.\n",
+			red->t140.datalen, UCHAR_MAX, red->t140.datalen - UCHAR_MAX);
+		red->t140.datalen = UCHAR_MAX;
+	}
 	red->len[i] = red->t140.datalen;
 
 	/* write each generation length in red header */
@@ -5531,7 +5738,7 @@ static int ast_rtp_write(struct ast_rtp_instance *instance, struct ast_frame *fr
 	format = frame->subclass.format;
 	if (ast_format_cmp(rtp->lasttxformat, format) == AST_FORMAT_CMP_NOT_EQUAL) {
 		/* Oh dear, if the format changed we will have to set up a new smoother */
-		ast_debug_rtp(1, "(%s) RTP ooh, format changed from %s to %s\n",
+		ast_debug_rtp(3, "(%s) RTP ooh, format changed from %s to %s\n",
 			ast_rtp_instance_get_channel_id(instance),
 			ast_format_get_name(rtp->lasttxformat),
 			ast_format_get_name(frame->subclass.format));
@@ -7170,8 +7377,8 @@ static int bridge_p2p_rtp_write(struct ast_rtp_instance *instance,
 	}
 
 	/* Otherwise adjust bridged payload to match */
-	bridged_payload = ast_rtp_codecs_payload_code_tx(ast_rtp_instance_get_codecs(instance1),
-		payload_type->asterisk_format, payload_type->format, payload_type->rtp_code);
+	bridged_payload = ast_rtp_codecs_payload_code_tx_sample_rate(ast_rtp_instance_get_codecs(instance1),
+		payload_type->asterisk_format, payload_type->format, payload_type->rtp_code, payload_type->sample_rate);
 
 	/* If no codec could be matched between instance and instance1, then somehow things were made incompatible while we were still bridged.  Bail. */
 	if (bridged_payload < 0) {
@@ -8859,12 +9066,7 @@ static void ast_rtp_prop_set(struct ast_rtp_instance *instance, enum ast_rtp_pro
 				 * switching from MUX. Either way, we won't have
 				 * a socket set up, and we need to set it up
 				 */
-				if ((rtp->rtcp->s =
-				     create_new_socket("RTCP",
-						       ast_sockaddr_is_ipv4(&rtp->rtcp->us) ?
-						       AF_INET :
-						       ast_sockaddr_is_ipv6(&rtp->rtcp->us) ?
-						       AF_INET6 : -1)) < 0) {
+				if ((rtp->rtcp->s = create_new_socket("RTCP", &rtp->rtcp->us)) < 0) {
 					ast_debug_rtcp(1, "(%p) RTCP failed to create a new socket\n", instance);
 					ast_free(rtp->rtcp->local_addr_str);
 					ast_free(rtp->rtcp);
@@ -9096,7 +9298,6 @@ static int rtp_red_init(struct ast_rtp_instance *instance, int buffer_time, int 
 	rtp->red->t140red = rtp->red->t140;
 	rtp->red->t140red.data.ptr = &rtp->red->t140red_data;
 
-	rtp->red->ti = buffer_time;
 	rtp->red->num_gen = generations;
 	rtp->red->hdrlen = generations * 4 + 1;
 
@@ -9106,12 +9307,18 @@ static int rtp_red_init(struct ast_rtp_instance *instance, int buffer_time, int 
 		rtp->red->t140red_data[x*4] = rtp->red->pt[x];
 	}
 	rtp->red->t140red_data[x*4] = rtp->red->pt[x] = payloads[x]; /* primary pt */
-	rtp->red->schedid = ast_sched_add(rtp->sched, generations, red_write, instance);
+	rtp->red->schedid = ast_sched_add(rtp->sched, buffer_time, red_write, instance);
 
 	return 0;
 }
 
-/*! \pre instance is locked */
+/*! \pre instance is locked
+ *
+ * \warning This code was written many years ago and it's unclear why we actually
+ * buffer OUTGOING T.140 text frames until a command is encountered but we do.
+ *
+ * This may change in the future.
+ */
 static int rtp_red_buffer(struct ast_rtp_instance *instance, struct ast_frame *frame)
 {
 	struct ast_rtp *rtp = ast_rtp_instance_get_data(instance);
@@ -9122,6 +9329,8 @@ static int rtp_red_buffer(struct ast_rtp_instance *instance, struct ast_frame *f
 	}
 
 	if (frame->datalen > 0) {
+		int space_available = 0;
+
 		if (red->t140.datalen > 0) {
 			const unsigned char *primary = red->buf_data;
 
@@ -9136,6 +9345,31 @@ static int rtp_red_buffer(struct ast_rtp_instance *instance, struct ast_frame *f
 					ast_rtp_write(instance, &rtp->red->t140);
 				}
 			}
+		}
+
+		/*
+		 * RED generation payload sizes are limited to 255 (UCHAR_MAX) bytes by virtue of
+		 * red->len being an array of usigned chars.  If adding the current frame will
+		 * exceed that, we're going to flush the saved frame then try again. If the new
+		 * frame fits, great otherwise we're going to toss it.  Without understanding
+		 * the purpose of the buffering, that's all we can do now.
+		 */
+		space_available = UCHAR_MAX - red->t140.datalen;
+
+		if (frame->datalen > space_available) {
+			ast_rtp_write(instance, &rtp->red->t140);
+			/*
+			 * ast_rtp_write() calls red_t140_to_red() which resets red->t140.datalen
+			 * back to 0 so we now have UCHAR_MAX space available.
+			 */
+			space_available = UCHAR_MAX;
+		}
+
+		if (frame->datalen > space_available) {
+			ast_log(LOG_WARNING, "%s: T.140 frame of %d bytes exceeds max of %u. Discarding.\n",
+				ast_rtp_instance_get_channel_id(instance),
+				frame->datalen, UCHAR_MAX);
+			return -1;
 		}
 
 		memcpy(&red->buf_data[red->t140.datalen], frame->data.ptr, frame->datalen);
@@ -9228,7 +9462,7 @@ static int ast_rtp_get_stat(struct ast_rtp_instance *instance, struct ast_rtp_in
 	AST_RTP_STAT_SET(AST_RTP_INSTANCE_STAT_LOCAL_MAXMES, AST_RTP_INSTANCE_STAT_COMBINED_MES, stats->local_maxmes, rtp->rtcp->maxrxmes);
 	AST_RTP_STAT_SET(AST_RTP_INSTANCE_STAT_LOCAL_MINMES, AST_RTP_INSTANCE_STAT_COMBINED_MES, stats->local_minmes, rtp->rtcp->minrxmes);
 	AST_RTP_STAT_SET(AST_RTP_INSTANCE_STAT_LOCAL_NORMDEVMES, AST_RTP_INSTANCE_STAT_COMBINED_MES, stats->local_normdevmes, rtp->rtcp->normdev_rxmes);
-	AST_RTP_STAT_SET(AST_RTP_INSTANCE_STAT_LOCAL_STDEVMES, AST_RTP_INSTANCE_STAT_COMBINED_MES, stats->local_stdevmes, rtp->rtcp->stdev_rxjitter);
+	AST_RTP_STAT_SET(AST_RTP_INSTANCE_STAT_LOCAL_STDEVMES, AST_RTP_INSTANCE_STAT_COMBINED_MES, stats->local_stdevmes, rtp->rtcp->stdev_rxmes);
 	AST_RTP_STAT_TERMINATOR(AST_RTP_INSTANCE_STAT_COMBINED_MES);
 
 
@@ -9533,67 +9767,87 @@ static int ast_rtp_bundle(struct ast_rtp_instance *child, struct ast_rtp_instanc
 #ifdef HAVE_PJPROJECT
 static void stunaddr_resolve_callback(const struct ast_dns_query *query)
 {
-	const int lowest_ttl = ast_dns_result_get_lowest_ttl(ast_dns_query_get_result(query));
 	const char *stunaddr_name = ast_dns_query_get_name(query);
-	const char *stunaddr_resolved_str;
 
-	if (!store_stunaddr_resolved(query)) {
-		ast_log(LOG_WARNING, "Failed to resolve stunaddr '%s'. Cancelling recurring resolution.\n", stunaddr_name);
-		return;
-	}
-
-	if (DEBUG_ATLEAST(2)) {
-		ast_rwlock_rdlock(&stunaddr_lock);
-		stunaddr_resolved_str = ast_inet_ntoa(stunaddr.sin_addr);
-		ast_rwlock_unlock(&stunaddr_lock);
-
-		ast_debug_stun(2, "Resolved stunaddr '%s' to '%s'. Lowest TTL = %d.\n",
-			stunaddr_name,
-			stunaddr_resolved_str,
-			lowest_ttl);
-	}
-
-	if (!lowest_ttl) {
-		ast_log(LOG_WARNING, "Resolution for stunaddr '%s' returned TTL = 0. Recurring resolution was cancelled.\n", ast_dns_query_get_name(query));
-	}
+	/* Call store_stunaddr_resolved with locking enabled. */
+	store_stunaddr_resolved(stunaddr_name, ast_dns_query_get_result(query), 1);
 }
 
-static int store_stunaddr_resolved(const struct ast_dns_query *query)
+static int store_stunaddr_resolved(const char *name, const struct ast_dns_result *result, int lock)
 {
-	const struct ast_dns_result *result = ast_dns_query_get_result(query);
 	const struct ast_dns_record *record;
+	struct ast_dns_query_recurring *last_resolver = stunaddr_resolver;
+	/*
+	 * According to https://datatracker.ietf.org/doc/html/rfc2181#section-5.2,
+	 * It is an error if the TTLs in an RRset differ but if they do, we should
+	 * use the lowest one.
+	 */
+	const int ttl = ast_dns_result_get_lowest_ttl(result);
 
 	for (record = ast_dns_result_get_records(result); record; record = ast_dns_record_get_next(record)) {
 		const size_t data_size = ast_dns_record_get_data_size(record);
 		const unsigned char *data = (unsigned char *)ast_dns_record_get_data(record);
 		const int rr_type = ast_dns_record_get_rr_type(record);
 
+		ast_debug_stun(2, "Record rr_type '%u' ttl: %d  data_size '%zu' from DNS query for stunaddr '%s'\n",
+			 rr_type, ttl, data_size, name);
+
 		if (rr_type == ns_t_a && data_size == 4) {
-			ast_rwlock_wrlock(&stunaddr_lock);
+			if (lock) {
+				ast_rwlock_wrlock(&stunaddr_lock);
+			}
 			memcpy(&stunaddr.sin_addr, data, data_size);
 			stunaddr.sin_family = AF_INET;
-			ast_rwlock_unlock(&stunaddr_lock);
+			stunaddr_ttl = ttl;
+			ast_debug_stun(2, "Resolved stunaddr '%s' to '%s'. TTL = %d.\n", name,
+				ast_inet_ntoa(stunaddr.sin_addr), stunaddr_ttl);
+			if (stunaddr_ttl == 0) {
+				ast_log(LOG_WARNING, "Resolution for stunaddr '%s' returned TTL = 0.  Recurring resolution disabled.\n", name);
+				ao2_cleanup(stunaddr_resolver);
+				stunaddr_resolver = NULL;
+			}
+			if (lock) {
+				ast_rwlock_unlock(&stunaddr_lock);
+			}
 
 			return 1;
 		} else {
-			ast_debug_stun(3, "Unrecognized rr_type '%u' or data_size '%zu' from DNS query for stunaddr '%s'\n",
-										 rr_type, data_size, ast_dns_query_get_name(query));
+			ast_debug_stun(2, "Unrecognized rr_type '%u' or data_size '%zu' from DNS query for stunaddr '%s'\n",
+				 rr_type, data_size, name);
 			continue;
 		}
 	}
+
+	ao2_cleanup(stunaddr_resolver);
+	stunaddr_resolver = NULL;
+	stunaddr_ttl = 0;
+
+	if (stunaddr.sin_addr.s_addr) {
+		ast_log(LOG_WARNING, "Lookup of stunaddr '%s' failed.%s STUN continuing with server %s:%d\n",
+			name, last_resolver ? " Periodic resolution cancelled." : "",
+			ast_inet_ntoa(stunaddr.sin_addr), htons(stunaddr.sin_port));
+	} else {
+		ast_log(LOG_WARNING, "Lookup of stunaddr '%s' failed. STUN disabled.\n", name);
+	}
+
 	return 0;
 }
 
 static void clean_stunaddr(void) {
+	ast_rwlock_wrlock(&stunaddr_lock);
+	ast_debug_stun(2, "Cleanup\n");
 	if (stunaddr_resolver) {
+		ast_debug_stun(2, "Cancelling recurring resolution for '%s'\n", stun_hostname);
 		if (ast_dns_resolve_recurring_cancel(stunaddr_resolver)) {
 			ast_log(LOG_ERROR, "Failed to cancel recurring DNS resolution of previous stunaddr.\n");
 		}
 		ao2_ref(stunaddr_resolver, -1);
 		stunaddr_resolver = NULL;
 	}
-	ast_rwlock_wrlock(&stunaddr_lock);
 	memset(&stunaddr, 0, sizeof(stunaddr));
+	stunaddr_ttl = 0;
+	ast_free(stun_hostname);
+	stun_hostname = NULL;
 	ast_rwlock_unlock(&stunaddr_lock);
 }
 #endif
@@ -9697,6 +9951,8 @@ static char *handle_cli_rtp_settings(struct ast_cli_entry *e, int cmd, struct as
 {
 #ifdef HAVE_PJPROJECT
 	struct sockaddr_in stunaddr_copy;
+	const char *stun_hostname_copy = NULL;
+	int stunaddr_ttl_copy = 0;
 #endif
 	switch (cmd) {
 	case CLI_INIT:
@@ -9733,8 +9989,26 @@ static char *handle_cli_rtp_settings(struct ast_cli_entry *e, int cmd, struct as
 
 	ast_rwlock_rdlock(&stunaddr_lock);
 	memcpy(&stunaddr_copy, &stunaddr, sizeof(stunaddr));
+	stun_hostname_copy = ast_strdupa(S_OR(stun_hostname, ""));
+	stunaddr_ttl_copy = stunaddr_ttl;
 	ast_rwlock_unlock(&stunaddr_lock);
-	ast_cli(a->fd, "  STUN address:    %s:%d\n", ast_inet_ntoa(stunaddr_copy.sin_addr), htons(stunaddr_copy.sin_port));
+
+	ast_cli(a->fd, "  STUN:            %s\n", stunaddr_copy.sin_addr.s_addr ? "enbabled" : "disabled");
+	if (ast_strlen_zero(stun_hostname_copy)) {
+		ast_cli(a->fd, "   Address:        %s:%d\n", ast_inet_ntoa(stunaddr_copy.sin_addr),
+			htons(stunaddr_copy.sin_port));
+	} else {
+		ast_cli(a->fd, "   Hostname:       %s:%d\n", stun_hostname_copy, htons(stunaddr_copy.sin_port));
+		ast_cli(a->fd, "   Resolved Addr:  %s:%d%s\n", ast_inet_ntoa(stunaddr_copy.sin_addr),
+			htons(stunaddr_copy.sin_port),
+			stunaddr_copy.sin_addr.s_addr ? stunaddr_resolver ? "" : " (possibly stale)" : " (lookup failed)");
+		ast_cli(a->fd, "   Last TTL:       %d  (periodic resolution %s)\n", stunaddr_ttl_copy,
+			stunaddr_resolver ? "enabled" : "disabled");
+		ast_cli(a->fd, "   Reresove TTL 0: %s\n", AST_CLI_YESNO(stunaddr_reresolve_ttl_0));
+	}
+	if (stun_acl) {
+		ast_acl_output(a->fd, stun_acl, "   ");
+	}
 #endif
 	return CLI_SUCCESS;
 }
@@ -9931,6 +10205,55 @@ static char *handle_cli_rtp_drop_incoming_packets(struct ast_cli_entry *e, int c
 }
 #endif
 
+#ifdef HAVE_PJPROJECT
+static char *handle_cli_rtp_refresh_stun(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	switch (cmd) {
+	case CLI_INIT:
+		e->command = "rtp resolve stun hostname";
+		e->usage =
+			"Usage: rtp resolve stun hostname\n"
+			"       Force a resolution of the STUN hostname (if set).\n";
+		return NULL;
+	case CLI_GENERATE:
+		return NULL;
+	}
+
+	if (a->argc != e->args) {
+		return CLI_SHOWUSAGE;
+	}
+
+	ast_rwlock_wrlock(&stunaddr_lock);
+	if (ast_strlen_zero(stun_hostname)) {
+		if (stunaddr.sin_addr.s_addr) {
+			ast_cli(a->fd, "RTP STUN server specified as IP address '%s'. Resolution not required./n",
+				ast_inet_ntoa(stunaddr.sin_addr));
+		} else {
+			ast_cli(a->fd, "RTP STUN disabled./n");
+		}
+	} else {
+		if (stunaddr_resolver) {
+			ast_debug_stun(2, "Cancelling recurring resolution for '%s'\n", stun_hostname);
+			if (ast_dns_resolve_recurring_cancel(stunaddr_resolver)) {
+				ast_log(LOG_ERROR, "Failed to cancel recurring DNS resolution of previous stunaddr.\n");
+			}
+			ao2_ref(stunaddr_resolver, -1);
+			stunaddr_resolver = NULL;
+		}
+		stunaddr_resolver = ast_dns_resolve_recurring(stun_hostname, T_A, C_IN, &stunaddr_resolve_callback, NULL);
+		if (!stunaddr_resolver) {
+			ast_cli(a->fd, "Failed to setup recurring DNS resolution of stunaddr '%s'",
+				stun_hostname);
+		} else {
+			ast_cli(a->fd, "Triggered background stun hostname resolution for '%s'.  Run 'rtp show settings' to check results.\n", stun_hostname);
+		}
+	}
+	ast_rwlock_unlock(&stunaddr_lock);
+
+	return CLI_SUCCESS;
+}
+#endif
+
 static struct ast_cli_entry cli_rtp[] = {
 	AST_CLI_DEFINE(handle_cli_rtp_set_debug,  "Enable/Disable RTP debugging"),
 	AST_CLI_DEFINE(handle_cli_rtp_settings,   "Display RTP settings"),
@@ -9938,6 +10261,9 @@ static struct ast_cli_entry cli_rtp[] = {
 	AST_CLI_DEFINE(handle_cli_rtcp_set_stats, "Enable/Disable RTCP stats"),
 #ifdef AST_DEVMODE
 	AST_CLI_DEFINE(handle_cli_rtp_drop_incoming_packets, "Drop RTP incoming packets"),
+#endif
+#ifdef HAVE_PJPROJECT
+	AST_CLI_DEFINE(handle_cli_rtp_refresh_stun, "Force a resolution of the STUN hostname"),
 #endif
 };
 
@@ -10060,6 +10386,9 @@ static int rtp_reload(int reload, int by_external_config)
 	if ((s = ast_variable_retrieve(cfg, "general", "stun_software_attribute"))) {
 		stun_software_attribute = ast_true(s);
 	}
+	if ((s = ast_variable_retrieve(cfg, "general", "stunaddr_reresolve_ttl_0"))) {
+		stunaddr_reresolve_ttl_0 = ast_true(s);
+	}
 	if ((s = ast_variable_retrieve(cfg, "general", "stunaddr"))) {
 		char *hostport, *host, *port;
 		unsigned int port_parsed = STANDARD_STUN_PORT;
@@ -10075,19 +10404,41 @@ static int rtp_reload(int reload, int by_external_config)
 			}
 			ast_rwlock_wrlock(&stunaddr_lock);
 			ast_sockaddr_to_sin(&stunaddr_parsed, &stunaddr);
+			/* Set stunaddr_ttl = -1 to indicate no resolution required in the future */
+			stunaddr_ttl = -1;
 			ast_rwlock_unlock(&stunaddr_lock);
 		} else if (ast_sockaddr_split_hostport(hostport, &host, &port, 0)) {
 			if (port) {
 				ast_parse_arg(port, PARSE_UINT32|PARSE_IN_RANGE, &port_parsed, 1, 65535);
 			}
-			stunaddr.sin_port = htons(port_parsed);
 
-			stunaddr_resolver = ast_dns_resolve_recurring(host, T_A, C_IN,
-				&stunaddr_resolve_callback, NULL);
-			if (!stunaddr_resolver) {
-				ast_log(LOG_ERROR, "Failed to setup recurring DNS resolution of stunaddr '%s'",
-					host);
+			ast_rwlock_wrlock(&stunaddr_lock);
+
+			stunaddr.sin_port = htons(port_parsed);
+			ast_free(stun_hostname);
+			stun_hostname = ast_strdup(host);
+			if (!stun_hostname) {
+				ast_log(LOG_ERROR, "Failed to set stun_hostname from '%s'", host);
+			} else {
+				stunaddr_resolver = ast_dns_resolve_recurring(host, T_A, C_IN,
+					&stunaddr_resolve_callback, NULL);
+				if (!stunaddr_resolver) {
+					ast_log(LOG_ERROR, "Failed to setup recurring DNS resolution of stunaddr '%s'",
+						host);
+				} else {
+					ast_debug_stun(2, "Attemping to start recurring stun hostname resolution for '%s'\n", stun_hostname);
+				}
+				/*
+				 * Set stunaddr_ttl = 0 to indicate resolution is required.
+				 * If a later query returns a positive ttl, great.  We'll use the results
+				 * of the last query until it expires.  If it returns 0, we'll resolve
+				 * every time we need it.
+				 */
+				stunaddr_ttl = 0;
 			}
+			ast_rwlock_unlock(&stunaddr_lock);
+
+
 		} else {
 			ast_log(LOG_ERROR, "Failed to parse stunaddr '%s'", hostport);
 		}
@@ -10125,7 +10476,7 @@ static int rtp_reload(int reload, int by_external_config)
 			continue;
 		}
 
-		sep = strchr(var->value,',');
+		sep = strchr((char *)var->value,',');
 		if (sep) {
 			*sep = '\0';
 			sep++;

@@ -42,6 +42,7 @@
 #include "asterisk/uuid.h"
 #include "asterisk/pbx.h"
 #include "asterisk/taskprocessor.h"
+#include "asterisk/taskpool.h"
 #include "asterisk/causes.h"
 #include "asterisk/sdp_srtp.h"
 #include "asterisk/dsp.h"
@@ -57,7 +58,7 @@
 #define SDP_HANDLER_BUCKETS 11
 
 #define MOD_DATA_ON_RESPONSE "on_response"
-#define MOD_DATA_NAT_HOOK "nat_hook"
+#define MOD_DATA_SUPPRESS_SIDE_EFFECTS "suppress_session_side_effects"
 
 /* Most common case is one audio and one video stream */
 #define DEFAULT_NUM_SESSION_MEDIA 2
@@ -1836,8 +1837,8 @@ end:
  * \brief Merge media states for a delayed session refresh
  *
  * \param session_name For log messages
- * \param delayed_pending_state The pending media state at the time the resuest was queued
- * \param delayed_active_state The active media state  at the time the resuest was queued
+ * \param delayed_pending_state The pending media state at the time the request was queued
+ * \param delayed_active_state The active media state at the time the request was queued
  * \param current_active_state The current active media state
  * \param run_post_validation Whether to run validation on the resulting media state or not
  *
@@ -2864,6 +2865,19 @@ void ast_sip_session_send_request(struct ast_sip_session *session, pjsip_tx_data
 	ast_sip_session_send_request_with_cb(session, tdata, NULL);
 }
 
+int ast_sip_session_suppress_response_side_effects(pjsip_tx_data *tdata)
+{
+	static const char marker[] = "suppress";
+
+	if (!tdata || session_module.id < 0) {
+		return -1;
+	}
+
+	ast_sip_mod_data_set(tdata->pool, tdata->mod_data, session_module.id,
+		MOD_DATA_SUPPRESS_SIDE_EFFECTS, (void *) marker);
+	return 0;
+}
+
 int ast_sip_session_create_invite(struct ast_sip_session *session, pjsip_tx_data **tdata)
 {
 	pjmedia_sdp_session *offer;
@@ -3127,115 +3141,14 @@ struct ast_sip_session *ast_sip_session_alloc(struct ast_sip_endpoint *endpoint,
 	return ret_session;
 }
 
-/*! \brief struct controlling the suspension of the session's serializer. */
-struct ast_sip_session_suspender {
-	ast_cond_t cond_suspended;
-	ast_cond_t cond_complete;
-	int suspended;
-	int complete;
-};
-
-static void sip_session_suspender_dtor(void *vdoomed)
-{
-	struct ast_sip_session_suspender *doomed = vdoomed;
-
-	ast_cond_destroy(&doomed->cond_suspended);
-	ast_cond_destroy(&doomed->cond_complete);
-}
-
-/*!
- * \internal
- * \brief Block the session serializer thread task.
- *
- * \param data Pushed serializer task data for suspension.
- *
- * \retval 0
- */
-static int sip_session_suspend_task(void *data)
-{
-	struct ast_sip_session_suspender *suspender = data;
-
-	ao2_lock(suspender);
-
-	/* Signal that the serializer task is now suspended. */
-	suspender->suspended = 1;
-	ast_cond_signal(&suspender->cond_suspended);
-
-	/* Wait for the serializer suspension to be completed. */
-	while (!suspender->complete) {
-		ast_cond_wait(&suspender->cond_complete, ao2_object_get_lockaddr(suspender));
-	}
-
-	ao2_unlock(suspender);
-	ao2_ref(suspender, -1);
-
-	return 0;
-}
-
 void ast_sip_session_suspend(struct ast_sip_session *session)
 {
-	struct ast_sip_session_suspender *suspender;
-	int res;
-
-	ast_assert(session->suspended == NULL);
-
-	if (ast_taskprocessor_is_task(session->serializer)) {
-		/* I am the session's serializer thread so I cannot suspend. */
-		return;
-	}
-
-	if (ast_taskprocessor_is_suspended(session->serializer)) {
-		/* The serializer already suspended. */
-		return;
-	}
-
-	suspender = ao2_alloc(sizeof(*suspender), sip_session_suspender_dtor);
-	if (!suspender) {
-		/* We will just have to hope that the system does not deadlock */
-		return;
-	}
-	ast_cond_init(&suspender->cond_suspended, NULL);
-	ast_cond_init(&suspender->cond_complete, NULL);
-
-	ao2_ref(suspender, +1);
-	res = ast_sip_push_task(session->serializer, sip_session_suspend_task, suspender);
-	if (res) {
-		/* We will just have to hope that the system does not deadlock */
-		ao2_ref(suspender, -2);
-		return;
-	}
-
-	session->suspended = suspender;
-
-	/* Wait for the serializer to get suspended. */
-	ao2_lock(suspender);
-	while (!suspender->suspended) {
-		ast_cond_wait(&suspender->cond_suspended, ao2_object_get_lockaddr(suspender));
-	}
-	ao2_unlock(suspender);
-
-	ast_taskprocessor_suspend(session->serializer);
+	ast_taskpool_serializer_suspend(session->serializer);
 }
 
 void ast_sip_session_unsuspend(struct ast_sip_session *session)
 {
-	struct ast_sip_session_suspender *suspender = session->suspended;
-
-	if (!suspender) {
-		/* Nothing to do */
-		return;
-	}
-	session->suspended = NULL;
-
-	/* Signal that the serializer task suspension is now complete. */
-	ao2_lock(suspender);
-	suspender->complete = 1;
-	ast_cond_signal(&suspender->cond_complete);
-	ao2_unlock(suspender);
-
-	ao2_ref(suspender, -1);
-
-	ast_taskprocessor_unsuspend(session->serializer);
+	ast_taskpool_serializer_unsuspend(session->serializer);
 }
 
 /*!
@@ -3348,6 +3261,12 @@ struct ast_sip_session *ast_sip_session_create_outgoing(struct ast_sip_endpoint 
 	struct ast_sip_session *ret_session;
 	SCOPE_ENTER(1, "%s %s Topology: %s\n", ast_sorcery_object_get_id(endpoint), request_user,
 		ast_str_tmp(256, ast_stream_topology_to_str(req_topology, &STR_TMP)));
+
+	if (ast_sip_session_check_supplement_create(endpoint, contact, location,
+			request_user, req_topology)) {
+		SCOPE_EXIT_RTN_VALUE(NULL, "%s: Session creation blocked by supplement\n",
+			ast_sorcery_object_get_id(endpoint));
+	}
 
 	/* If no location has been provided use the AOR list from the endpoint itself */
 	if (location || !contact) {
@@ -4656,6 +4575,10 @@ static int check_request_status(pjsip_inv_session *inv, pjsip_event *e)
 	struct ast_sip_session *session = inv->mod_data[session_module.id];
 	pjsip_transaction *tsx = e->body.tsx_state.tsx;
 
+	if (inv->state == PJSIP_INV_STATE_DISCONNECTED && inv->cancelling) {
+		return 0;
+	}
+
 	if (tsx->status_code != 503 && tsx->status_code != 408) {
 		return 0;
 	}
@@ -4863,6 +4786,15 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 		tsx->mod_data[id] = e->body.tsx_state.src.tdata->mod_data[id];
 		break;
 	case PJSIP_EVENT_RX_MSG:
+		/*
+		 * Recording-fork MESSAGE stays on this dialog so it keeps the Call-ID
+		 * and CSeq, but it is not call signaling. Do not let supplements apply
+		 * a Reason header to the channel, and do not resend on 401/407/494.
+		 */
+		if (tsx->last_tx && ast_sip_mod_data_get(tsx->last_tx->mod_data, id,
+				MOD_DATA_SUPPRESS_SIDE_EFFECTS)) {
+			SCOPE_EXIT_RTN("Suppressed in-dialog request side effects\n");
+		}
 		cb = ast_sip_mod_data_get(tsx->mod_data, id, MOD_DATA_ON_RESPONSE);
 		/* As the PJSIP invite session implementation responds with a 200 OK before we have a
 		 * chance to be invoked session supplements for BYE requests actually end up executing
@@ -5594,8 +5526,6 @@ static pjsip_inv_callback inv_callback = {
 static void session_outgoing_nat_hook(pjsip_tx_data *tdata, struct ast_sip_transport *transport)
 {
 	RAII_VAR(struct ast_sip_transport_state *, transport_state, ast_sip_get_transport_state(ast_sorcery_object_get_id(transport)), ao2_cleanup);
-	struct ast_sip_nat_hook *hook = ast_sip_mod_data_get(
-		tdata->mod_data, session_module.id, MOD_DATA_NAT_HOOK);
 	pjsip_sdp_info *sdp_info;
 	pjmedia_sdp_session *sdp;
 	pjsip_dialog *dlg = pjsip_tdata_get_dlg(tdata);
@@ -5603,10 +5533,9 @@ static void session_outgoing_nat_hook(pjsip_tx_data *tdata, struct ast_sip_trans
 	int stream;
 
 	/*
-	 * If there's no transport_state or body, or the hook
-	 * has already been run, just return.
+	 * If there's no transport_state or body, just return.
 	 */
-	if (ast_strlen_zero(transport->external_media_address) || !transport_state || hook || !tdata->msg->body) {
+	if (ast_strlen_zero(transport->external_media_address) || !transport_state || !tdata->msg->body) {
 		return;
 	}
 
@@ -5657,8 +5586,6 @@ static void session_outgoing_nat_hook(pjsip_tx_data *tdata, struct ast_sip_trans
 		}
 	}
 
-	/* We purposely do this so that the hook will not be invoked multiple times, ie: if a retransmit occurs */
-	ast_sip_mod_data_set(tdata->pool, tdata->mod_data, session_module.id, MOD_DATA_NAT_HOOK, nat_hook);
 }
 
 #ifdef TEST_FRAMEWORK

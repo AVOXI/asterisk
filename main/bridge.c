@@ -29,6 +29,9 @@
 
 /*** DOCUMENTATION
 	<manager name="BridgeTechnologyList" language="en_US">
+		<since>
+			<version>12.0.0</version>
+		</since>
 		<synopsis>
 			List available bridging technologies and their statuses.
 		</synopsis>
@@ -44,6 +47,9 @@
 		</see-also>
 	</manager>
 	<manager name="BridgeTechnologySuspend" language="en_US">
+		<since>
+			<version>12.0.0</version>
+		</since>
 		<synopsis>
 			Suspend a bridging technology.
 		</synopsis>
@@ -62,6 +68,9 @@
 		</see-also>
 	</manager>
 	<manager name="BridgeTechnologyUnsuspend" language="en_US">
+		<since>
+			<version>12.0.0</version>
+		</since>
 		<synopsis>
 			Unsuspend a bridging technology.
 		</synopsis>
@@ -124,6 +133,8 @@ static struct ao2_container *bridges;
 
 static AST_RWLIST_HEAD_STATIC(bridge_technologies, ast_bridge_technology);
 
+AST_MUTEX_DEFINE_STATIC(bridge_init_lock);
+
 static unsigned int optimization_id;
 
 /* Initial starting point for the bridge array of channels */
@@ -137,6 +148,17 @@ static unsigned int optimization_id;
 
 /* Variable name - stores peer information about the most recent attended transfer */
 #define ATTENDEDTRANSFER "ATTENDEDTRANSFER"
+
+/*!
+ * \brief Compare a bridge variable name with a given name.
+ *
+ * \param var_str The variable name to compare.
+ * \param name The name to compare against.
+ *
+ * \retval 0 if the names do not match.
+ * \retval 1 if the names match.
+ */
+#define BV_NAME_CMP(var_str, name) !strcmp(var_str, name)
 
 static void cleanup_video_mode(struct ast_bridge *bridge);
 
@@ -321,6 +343,8 @@ void bridge_dissolve(struct ast_bridge *bridge, int cause)
 	};
 
 	if (bridge->dissolved) {
+		ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": already dissolved\n",
+			BRIDGE_PRINTF_VARS(bridge));
 		return;
 	}
 	bridge->dissolved = 1;
@@ -330,16 +354,22 @@ void bridge_dissolve(struct ast_bridge *bridge, int cause)
 	}
 	bridge->cause = cause;
 
-	ast_debug(1, "Bridge %s: dissolving bridge with cause %d(%s)\n",
-		bridge->uniqueid, cause, ast_cause2str(cause));
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": dissolving with cause %d(%s)\n",
+		BRIDGE_PRINTF_VARS(bridge), cause, ast_cause2str(cause));
 
 	AST_LIST_TRAVERSE(&bridge->channels, bridge_channel, entry) {
+		ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": kicking channel %s\n",
+			BRIDGE_PRINTF_VARS(bridge),
+			ast_channel_name(bridge_channel->chan));
 		ast_bridge_channel_leave_bridge(bridge_channel,
 			BRIDGE_CHANNEL_STATE_END_NO_DISSOLVE, cause);
 	}
 
 	/* Must defer dissolving bridge because it is already locked. */
 	ast_bridge_queue_action(bridge, &action);
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": DEFERRED_DISSOLVING queued.  current refcound: %d\n",
+		BRIDGE_PRINTF_VARS(bridge), ao2_ref(bridge, 0));
+
 }
 
 /*!
@@ -504,27 +534,27 @@ static struct ast_bridge_technology *find_best_technology(uint32_t capabilities,
 	AST_RWLIST_RDLOCK(&bridge_technologies);
 	AST_RWLIST_TRAVERSE(&bridge_technologies, current, entry) {
 		if (current->suspended) {
-			ast_debug(1, "Bridge technology %s is suspended. Skipping.\n",
+			ast_debug(2, "Bridge technology %s is suspended. Skipping.\n",
 				current->name);
 			continue;
 		}
 		if (!(current->capabilities & capabilities)) {
-			ast_debug(1, "Bridge technology %s does not have any capabilities we want.\n",
+			ast_debug(2, "Bridge technology %s does not have any capabilities we want.\n",
 				current->name);
 			continue;
 		}
 		if (best && current->preference <= best->preference) {
-			ast_debug(1, "Bridge technology %s has less preference than %s (%u <= %u). Skipping.\n",
+			ast_debug(2, "Bridge technology %s has less preference than %s (%u <= %u). Skipping.\n",
 				current->name, best->name, current->preference, best->preference);
 			continue;
 		}
 		if (current->compatible && !current->compatible(bridge)) {
-			ast_debug(1, "Bridge technology %s is not compatible with properties of existing bridge.\n",
+			ast_debug(2, "Bridge technology %s is not compatible with properties of existing bridge.\n",
 				current->name);
 			continue;
 		}
 		if (!ast_module_running_ref(current->mod)) {
-			ast_debug(1, "Bridge technology %s is not running, skipping.\n", current->name);
+			ast_debug(2, "Bridge technology %s is not running, skipping.\n", current->name);
 			continue;
 		}
 		if (best) {
@@ -640,9 +670,10 @@ static void bridge_handle_actions(struct ast_bridge *bridge)
 static void destroy_bridge(void *obj)
 {
 	struct ast_bridge *bridge = obj;
+	struct ast_var_t *var;
 
-	ast_debug(1, "Bridge %s: actually destroying %s bridge, nobody wants it anymore\n",
-		bridge->uniqueid, bridge->v_table->name);
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": actually destroying %s bridge, nobody wants it anymore\n",
+		BRIDGE_PRINTF_VARS(bridge), bridge->v_table->name);
 
 	if (bridge->construction_completed) {
 		bridge_topics_destroy(bridge);
@@ -684,18 +715,46 @@ static void destroy_bridge(void *obj)
 
 	cleanup_video_mode(bridge);
 
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": destroyed\n",
+		BRIDGE_PRINTF_VARS(bridge));
 	ast_string_field_free_memory(bridge);
 	ao2_cleanup(bridge->current_snapshot);
+	bridge->current_snapshot = NULL;
+	while ((var = AST_LIST_REMOVE_HEAD(&bridge->bridgevars, entries))) {
+		ast_var_delete(var);
+	}
+	AST_LIST_HEAD_INIT_NOLOCK(&bridge->bridgevars);
+	AST_VECTOR_RESET(&bridge->ari_reportable_variable_names, ast_free);
+	AST_VECTOR_FREE(&bridge->ari_reportable_variable_names);
 }
 
 struct ast_bridge *bridge_register(struct ast_bridge *bridge)
 {
 	if (bridge) {
+		SCOPED_MUTEX(lock, &bridge_init_lock);
+		/*
+		 * Although bridge_base_init() should have already checked for
+		 * an existing bridge with the same uniqueid, bridge_base_init()
+		 * and bridge_register() are two separate public APIs so we need
+		 * to check again here.
+		 */
+		struct ast_bridge *existing = ast_bridge_find_by_id(bridge->uniqueid);
+		if (existing) {
+			ast_log(LOG_WARNING, "Bridge " BRIDGE_PRINTF_SPEC ": already registered\n",
+				BRIDGE_PRINTF_VARS(bridge));
+			ao2_ref(existing, -1);
+			ast_bridge_destroy(bridge, 0);
+			return NULL;
+		}
+		ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": registering\n",
+			BRIDGE_PRINTF_VARS(bridge));
 		bridge->construction_completed = 1;
 		ast_bridge_lock(bridge);
 		ast_bridge_publish_state(bridge);
 		ast_bridge_unlock(bridge);
 		if (!ao2_link(bridges, bridge)) {
+			ast_log(LOG_WARNING, "Bridge " BRIDGE_PRINTF_SPEC ": failed to link\n",
+				BRIDGE_PRINTF_VARS(bridge));
 			ast_bridge_destroy(bridge, 0);
 			bridge = NULL;
 		}
@@ -735,6 +794,8 @@ struct ast_bridge *bridge_alloc(size_t size, const struct ast_bridge_methods *v_
 	bridge->v_table = v_table;
 
 	AST_VECTOR_INIT(&bridge->media_types, AST_MEDIA_TYPE_END);
+	AST_LIST_HEAD_INIT_NOLOCK(&bridge->bridgevars);
+	AST_VECTOR_INIT(&bridge->ari_reportable_variable_names, 8);
 
 	return bridge;
 }
@@ -747,28 +808,44 @@ struct ast_bridge *bridge_base_init(struct ast_bridge *self, uint32_t capabiliti
 		return NULL;
 	}
 
-	if (!ast_strlen_zero(id)) {
-		ast_string_field_set(self, uniqueid, id);
-	} else {
-		ast_uuid_generate_str(uuid_hold, AST_UUID_STR_LEN);
-		ast_string_field_set(self, uniqueid, uuid_hold);
+	{
+		/*
+		 * We need to ensure that another bridge with the same uniqueid
+		 * doesn't get created before the previous bridge's destructor
+		 * has run and deleted the existing topic.
+		 */
+		SCOPED_MUTEX(lock, &bridge_init_lock);
+		if (!ast_strlen_zero(id)) {
+			if (ast_bridge_topic_exists(id)) {
+				ast_log(LOG_WARNING, "Bridge " BRIDGE_PRINTF_SPEC ": already registered\n",
+					BRIDGE_PRINTF_VARS(self));
+				ast_bridge_destroy(self, 0);
+				return NULL;
+			}
+			ast_string_field_set(self, uniqueid, id);
+		} else {
+			ast_uuid_generate_str(uuid_hold, AST_UUID_STR_LEN);
+			ast_string_field_set(self, uniqueid, uuid_hold);
+		}
+		if (!(flags & AST_BRIDGE_FLAG_INVISIBLE)) {
+			if (bridge_topics_init(self) != 0) {
+				ast_log(LOG_WARNING, "Bridge " BRIDGE_PRINTF_SPEC ": Could not initialize topics\n",
+					BRIDGE_PRINTF_VARS(self));
+				ao2_ref(self, -1);
+				return NULL;
+			}
+		}
 	}
+
 	ast_string_field_set(self, creator, creator);
 	if (!ast_strlen_zero(creator)) {
 		ast_string_field_set(self, name, name);
 	}
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": base_init\n",
+		BRIDGE_PRINTF_VARS(self));
 
 	ast_set_flag(&self->feature_flags, flags);
 	self->allowed_capabilities = capabilities;
-
-	if (!(flags & AST_BRIDGE_FLAG_INVISIBLE)) {
-		if (bridge_topics_init(self) != 0) {
-			ast_log(LOG_WARNING, "Bridge %s: Could not initialize topics\n",
-				self->uniqueid);
-			ao2_ref(self, -1);
-			return NULL;
-		}
-	}
 
 	/* Use our helper function to find the "best" bridge technology. */
 	self->technology = find_best_technology(capabilities, self);
@@ -805,6 +882,8 @@ struct ast_bridge *bridge_base_init(struct ast_bridge *self, uint32_t capabiliti
 	}
 
 	self->creationtime = ast_tvnow();
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": base_init complete\n",
+		BRIDGE_PRINTF_VARS(self));
 
 	return self;
 }
@@ -820,6 +899,8 @@ struct ast_bridge *bridge_base_init(struct ast_bridge *self, uint32_t capabiliti
  */
 static void bridge_base_destroy(struct ast_bridge *self)
 {
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": destroying bridge (noop)\n",
+		BRIDGE_PRINTF_VARS(self));
 }
 
 /*!
@@ -831,7 +912,11 @@ static void bridge_base_destroy(struct ast_bridge *self)
  */
 static void bridge_base_dissolving(struct ast_bridge *self)
 {
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": unlinking bridge.  Refcount: %d\n",
+		BRIDGE_PRINTF_VARS(self), ao2_ref(self, 0));
 	ao2_unlink(bridges, self);
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": unlinked bridge.  Refcount: %d\n",
+		BRIDGE_PRINTF_VARS(self), ao2_ref(self, 0));
 }
 
 /*!
@@ -943,10 +1028,14 @@ struct ast_bridge *ast_bridge_base_new(uint32_t capabilities, unsigned int flags
 
 int ast_bridge_destroy(struct ast_bridge *bridge, int cause)
 {
-	ast_debug(1, "Bridge %s: telling all channels to leave the party\n", bridge->uniqueid);
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": destroying.  current refcount: %d\n",
+		BRIDGE_PRINTF_VARS(bridge), ao2_ref(bridge, 0));
 	ast_bridge_lock(bridge);
 	bridge_dissolve(bridge, cause);
 	ast_bridge_unlock(bridge);
+
+	ast_debug(1, "Bridge " BRIDGE_PRINTF_SPEC ": unreffing.  current refcount: %d\n",
+		BRIDGE_PRINTF_VARS(bridge), ao2_ref(bridge, 0));
 
 	ao2_ref(bridge, -1);
 
@@ -1215,6 +1304,116 @@ void ast_bridge_vars_set(struct ast_channel *chan, const char *name, const char 
 	pbx_builtin_setvar_helper(chan, "BRIDGEPEER", name);
 	pbx_builtin_setvar_helper(chan, "BRIDGEPVTCALLID", pvtid);
 	ast_channel_stage_snapshot_done(chan);
+}
+
+static int bridge_set_ari_var_reportable(struct ast_bridge *bridge, const char *variable,
+	int report_events)
+{
+	char *var_str;
+
+	if (ast_strlen_zero(variable)) {
+		return -1;
+	}
+
+	if (!report_events) {
+		AST_VECTOR_REMOVE_CMP_UNORDERED(&bridge->ari_reportable_variable_names, variable,
+			BV_NAME_CMP, ast_free);
+		return 0;
+	}
+
+	if (AST_VECTOR_GET_CMP(&bridge->ari_reportable_variable_names, variable, BV_NAME_CMP)) {
+		return 0; /* already present */
+	}
+
+	var_str = ast_strdup(variable);
+	if (!var_str) {
+		return -1;
+	}
+
+	if (AST_VECTOR_APPEND(&bridge->ari_reportable_variable_names, var_str)) {
+		ast_free(var_str);
+		return -1;
+	}
+
+	return 0;
+}
+
+int ast_bridge_set_variable(struct ast_bridge *bridge, const char *name, const char *value,
+	int report_events)
+{
+	struct ast_var_t *var;
+
+	if (ast_strlen_zero(name)) {
+		return -1;
+	}
+
+	AST_LIST_TRAVERSE_SAFE_BEGIN(&bridge->bridgevars, var, entries) {
+		if (!strcmp(ast_var_name(var), name)) {
+			AST_LIST_REMOVE_CURRENT(entries);
+			ast_var_delete(var);
+			break;
+		}
+	}
+	AST_LIST_TRAVERSE_SAFE_END;
+
+	if (ast_strlen_zero(value)) {
+		/* If the value is empty, remove the variable from the reportable list by
+		   forcing report_events to 0 */
+		bridge_set_ari_var_reportable(bridge, name, 0);
+		return 0;
+	}
+
+	var = ast_var_assign(name, value);
+	if (!var) {
+		return -1;
+	}
+
+	if (bridge_set_ari_var_reportable(bridge, name, report_events)) {
+		ast_var_delete(var);
+		return -1;
+	}
+
+	AST_LIST_INSERT_TAIL(&bridge->bridgevars, var, entries);
+	return 0;
+}
+
+const char *ast_bridge_get_variable(const struct ast_bridge *bridge, const char *name)
+{
+	return ast_var_find(&bridge->bridgevars, name);
+}
+
+struct varshead *ast_bridge_get_ari_reportable_variables(struct ast_bridge *bridge)
+{
+	struct varshead *ret;
+	char *var_str;
+	size_t i;
+
+	if (AST_VECTOR_SIZE(&bridge->ari_reportable_variable_names) == 0) {
+		return NULL;
+	}
+
+	ret = ast_var_list_create();
+	if (!ret) {
+		return NULL;
+	}
+
+	for (i = 0; i < AST_VECTOR_SIZE(&bridge->ari_reportable_variable_names); ++i) {
+		const char *val = NULL;
+		struct ast_var_t *var;
+
+		var_str = AST_VECTOR_GET(&bridge->ari_reportable_variable_names, i);
+		val = ast_bridge_get_variable(bridge, var_str);
+
+		var = ast_var_assign(var_str, val ? val : "");
+		if (!var) {
+			ast_var_list_destroy(ret);
+			return NULL;
+		}
+
+		AST_LIST_INSERT_TAIL(ret, var, entries);
+	}
+
+	return ret;
 }
 
 /*!
@@ -2509,6 +2708,8 @@ int ast_bridge_add_channel(struct ast_bridge *bridge, struct ast_channel *chan,
 		ast_bridge_unlock(chan_bridge);
 		ast_bridge_unlock(bridge);
 	} else {
+		int noanswer;
+		const char *value;
 		/* Slightly less easy case. We need to yank channel A from
 		 * where he currently is and impart him into our bridge.
 		 */
@@ -2518,9 +2719,17 @@ int ast_bridge_add_channel(struct ast_bridge *bridge, struct ast_channel *chan,
 			ast_bridge_features_destroy(features);
 			return -1;
 		}
-		if (ast_channel_state(yanked_chan) != AST_STATE_UP) {
+
+		ast_channel_lock(chan);
+		value = pbx_builtin_getvar_helper(chan, "BRIDGE_NOANSWER");
+		noanswer = !ast_strlen_zero(value) ? 1 : 0;
+		ast_channel_unlock(chan);
+		if (noanswer) {
+			ast_debug(3, "Skipping answer on bridge target channel %s\n", ast_channel_name(chan));
+		} else if (ast_channel_state(yanked_chan) != AST_STATE_UP) {
 			ast_answer(yanked_chan);
 		}
+
 		ast_channel_ref(yanked_chan);
 		if (ast_bridge_impart(bridge, yanked_chan, NULL, features,
 			AST_BRIDGE_IMPART_CHAN_INDEPENDENT)) {
@@ -4176,7 +4385,7 @@ static enum ast_transfer_result blind_transfer_bridge(int is_external,
  * the transferee channel.
  *
  * \param channels A two-channel container containing the transferer and transferee
- * \param transferer The party that is transfering the call
+ * \param transferer The party that is transferring the call
  * \return The party that is being transferred
  */
 static struct ast_channel *get_transferee(struct ao2_container *channels, struct ast_channel *transferer)
@@ -4216,7 +4425,7 @@ static struct ast_channel *get_transferee(struct ao2_container *channels, struct
  * \param bridge2 Bridge that chan2 is in. If NULL, then chan2 is not bridged.
  * \param transfer_msg Data to publish for a stasis attended transfer message.
  * \retval AST_BRIDGE_TRANSFER_FAIL Internal error occurred
- * \retval AST_BRIDGE_TRANSFER_SUCCESS Succesfully transferred the bridge
+ * \retval AST_BRIDGE_TRANSFER_SUCCESS Successfully transferred the bridge
  */
 static enum ast_transfer_result attended_transfer_bridge(struct ast_channel *chan1,
 		struct ast_channel *chan2, struct ast_bridge *bridge1, struct ast_bridge *bridge2,
@@ -5035,8 +5244,8 @@ static char *complete_bridge_live(const char *word)
 
 static char *handle_bridge_show_all(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
-#define FORMAT_HDR "%-36s %5s %-15s %-15s %s\n"
-#define FORMAT_ROW "%-36s %5u %-15s %-15s %s\n"
+#define FORMAT_HDR "%-36s %-36s %5s %-15s %-15s %s\n"
+#define FORMAT_ROW "%-36s %-36s %5u %-15s %-15s %s\n"
 
 	struct ao2_iterator iter;
 	struct ast_bridge *bridge;
@@ -5052,7 +5261,7 @@ static char *handle_bridge_show_all(struct ast_cli_entry *e, int cmd, struct ast
 		return NULL;
 	}
 
-	ast_cli(a->fd, FORMAT_HDR, "Bridge-ID", "Chans", "Type", "Technology", "Duration");
+	ast_cli(a->fd, FORMAT_HDR, "Bridge-ID", "Name", "Chans", "Type", "Technology", "Duration");
 
 	iter = ao2_iterator_init(bridges, 0);
 	for (; (bridge = ao2_iterator_next(&iter)); ao2_ref(bridge, -1)) {
@@ -5062,7 +5271,8 @@ static char *handle_bridge_show_all(struct ast_cli_entry *e, int cmd, struct ast
 		if (snapshot) {
 			ast_format_duration_hh_mm_ss(ast_tvnow().tv_sec - snapshot->creationtime.tv_sec, print_time, sizeof(print_time));
 			ast_cli(a->fd, FORMAT_ROW,
-				snapshot->uniqueid,
+				bridge->uniqueid,
+				S_OR(bridge->name, "<unknown>"),
 				snapshot->num_channels,
 				S_OR(snapshot->subclass, "<unknown>"),
 				S_OR(snapshot->technology, "<unknown>"),
