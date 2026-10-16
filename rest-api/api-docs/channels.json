@@ -2215,7 +2215,7 @@
 						"22.10.1"
 					],
 					"summary": "Start or stop an in-dialog recording fork.",
-					"notes": "Sends FORK_START or FORK_STOP as a text/plain MESSAGE on the channel's existing PJSIP dialog. The request does not create a channel, send SDP, or re-INVITE. sentHost and heardHost are an IPv4 address or hostname; the body field is host:port. A 200 body is {\"sipStatus\": n} when the final SIP response is 2xx. A final SIP response of 300 or higher is HTTP 500 with the same body.",
+					"notes": "Sends FORK_START or FORK_STOP as a text/plain MESSAGE on the channel's existing PJSIP dialog. The request does not create a channel, send SDP, or re-INVITE. sentHost and heardHost are an IPv4 address or hostname; the body field is host:port. A 200 body is {\"sipStatus\": n} when the final SIP response is 2xx. A final SIP response of 300 or higher is HTTP 500 with the same body. timeoutMs defaults to 3000 and must be an integer from 1 to 30000.",
 					"nickname": "recordingFork",
 					"responseClass": "object",
 					"parameters": [
@@ -2229,59 +2229,11 @@
 						},
 						{
 							"name": "request",
-							"description": "JSON body. Fields are action, orgId, callId, and for start also sentHost, sentPort, heardHost, heardPort, and codec. timeoutMs is optional.",
+							"description": "JSON body. Fields are action, orgId, callId, and for start also sentHost, sentPort, heardHost, heardPort, and codec. timeoutMs is optional and must be an integer from 1 to 30000.",
 							"paramType": "body",
 							"required": true,
 							"allowMultiple": false,
 							"dataType": "object"
-						},
-						{
-							"name": "action",
-							"description": "start or stop",
-							"paramType": "query",
-							"required": true,
-							"allowMultiple": false,
-							"dataType": "string"
-						},
-						{
-							"name": "orgId",
-							"description": "Organization id placed in the FORK_START / FORK_STOP body",
-							"paramType": "query",
-							"required": true,
-							"allowMultiple": false,
-							"dataType": "string"
-						},
-						{
-							"name": "callId",
-							"description": "Call id placed in the FORK_START / FORK_STOP body",
-							"paramType": "query",
-							"required": true,
-							"allowMultiple": false,
-							"dataType": "string"
-						},
-						{
-							"name": "sentHost",
-							"description": "Start only. IPv4 address or hostname that receives initiator-sent audio",
-							"paramType": "query",
-							"required": false,
-							"allowMultiple": false,
-							"dataType": "string"
-						},
-						{
-							"name": "heardHost",
-							"description": "Start only. IPv4 address or hostname that receives initiator-heard audio",
-							"paramType": "query",
-							"required": false,
-							"allowMultiple": false,
-							"dataType": "string"
-						},
-						{
-							"name": "codec",
-							"description": "Start only. Codec name placed in the FORK_START body",
-							"paramType": "query",
-							"required": false,
-							"allowMultiple": false,
-							"dataType": "string"
 						}
 					],
 					"errorResponses": [

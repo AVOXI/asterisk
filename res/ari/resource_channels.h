@@ -973,20 +973,8 @@ void ast_ari_channels_transfer_progress(struct ast_variable *headers, struct ast
 struct ast_ari_channels_recording_fork_args {
 	/*! Channel's id. The initiating PJSIP channel, not a new recording channel. */
 	const char *channel_id;
-	/*! JSON body. Fields are action, orgId, callId, and for start also sentHost, sentPort, heardHost, heardPort, and codec. timeoutMs is optional. */
+	/*! JSON body. Fields are action, orgId, callId, and for start also sentHost, sentPort, heardHost, heardPort, and codec. timeoutMs is optional and must be an integer from 1 to 30000. */
 	struct ast_json *request;
-	/*! start or stop */
-	const char *action;
-	/*! Organization id placed in the FORK_START / FORK_STOP body */
-	const char *org_id;
-	/*! Call id placed in the FORK_START / FORK_STOP body */
-	const char *call_id;
-	/*! Start only. IPv4 address or hostname that receives initiator-sent audio */
-	const char *sent_host;
-	/*! Start only. IPv4 address or hostname that receives initiator-heard audio */
-	const char *heard_host;
-	/*! Start only. Codec name placed in the FORK_START body */
-	const char *codec;
 };
 /*!
  * \brief Body parsing function for /channels/{channelId}/recordingFork.
@@ -1002,7 +990,7 @@ int ast_ari_channels_recording_fork_parse_body(
 /*!
  * \brief Start or stop an in-dialog recording fork.
  *
- * Sends FORK_START or FORK_STOP as a text/plain MESSAGE on the channel's existing PJSIP dialog. The request does not create a channel, send SDP, or re-INVITE. sentHost and heardHost are an IPv4 address or hostname; the body field is host:port. A 200 body is {"sipStatus": n} when the final SIP response is 2xx. A final SIP response of 300 or higher is HTTP 500 with the same body.
+ * Sends FORK_START or FORK_STOP as a text/plain MESSAGE on the channel's existing PJSIP dialog. The request does not create a channel, send SDP, or re-INVITE. sentHost and heardHost are an IPv4 address or hostname; the body field is host:port. A 200 body is {"sipStatus": n} when the final SIP response is 2xx. A final SIP response of 300 or higher is HTTP 500 with the same body. timeoutMs defaults to 3000 and must be an integer from 1 to 30000.
  *
  * \param headers HTTP headers
  * \param args Swagger parameters

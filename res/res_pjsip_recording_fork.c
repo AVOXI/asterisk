@@ -165,6 +165,14 @@ static int recording_fork_send_task(void *data)
 	}
 
 	dlg = send->session->inv_session->dlg;
+	/* pjsip only delivers on_tsx_state to the transaction user (mod_ua for
+	 * dialog requests), which forwards it to the dialog's usages. Become a
+	 * usage of this dialog once so the MESSAGE transaction reaches us. */
+	if (!pjsip_dlg_has_usage(dlg, &recording_fork_module)
+		&& pjsip_dlg_add_usage(dlg, &recording_fork_module, NULL) != PJ_SUCCESS) {
+		ast_log(LOG_WARNING, "Failed to add recording fork usage to dialog\n");
+		return 0;
+	}
 	if (ast_sip_create_request("MESSAGE", dlg, send->session->endpoint, NULL, NULL, &tdata) || !tdata) {
 		return 0;
 	}

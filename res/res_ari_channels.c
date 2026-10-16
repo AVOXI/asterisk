@@ -3391,32 +3391,7 @@ int ast_ari_channels_recording_fork_parse_body(
 	struct ast_json *body,
 	struct ast_ari_channels_recording_fork_args *args)
 {
-	struct ast_json *field;
 	/* Parse query parameters out of it */
-	field = ast_json_object_get(body, "action");
-	if (field) {
-		args->action = ast_json_string_get(field);
-	}
-	field = ast_json_object_get(body, "orgId");
-	if (field) {
-		args->org_id = ast_json_string_get(field);
-	}
-	field = ast_json_object_get(body, "callId");
-	if (field) {
-		args->call_id = ast_json_string_get(field);
-	}
-	field = ast_json_object_get(body, "sentHost");
-	if (field) {
-		args->sent_host = ast_json_string_get(field);
-	}
-	field = ast_json_object_get(body, "heardHost");
-	if (field) {
-		args->heard_host = ast_json_string_get(field);
-	}
-	field = ast_json_object_get(body, "codec");
-	if (field) {
-		args->codec = ast_json_string_get(field);
-	}
 	return 0;
 }
 
@@ -3441,27 +3416,6 @@ static void ast_ari_channels_recording_fork_cb(
 	int code;
 #endif /* AST_DEVMODE */
 
-	for (i = get_params; i; i = i->next) {
-		if (strcmp(i->name, "action") == 0) {
-			args.action = (i->value);
-		} else
-		if (strcmp(i->name, "orgId") == 0) {
-			args.org_id = (i->value);
-		} else
-		if (strcmp(i->name, "callId") == 0) {
-			args.call_id = (i->value);
-		} else
-		if (strcmp(i->name, "sentHost") == 0) {
-			args.sent_host = (i->value);
-		} else
-		if (strcmp(i->name, "heardHost") == 0) {
-			args.heard_host = (i->value);
-		} else
-		if (strcmp(i->name, "codec") == 0) {
-			args.codec = (i->value);
-		} else
-		{}
-	}
 	for (i = path_vars; i; i = i->next) {
 		if (strcmp(i->name, "channelId") == 0) {
 			args.channel_id = (i->value);

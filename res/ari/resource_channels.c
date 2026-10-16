@@ -49,9 +49,6 @@
 #include "resource_channels.h"
 #include "asterisk/recording_fork.h"
 
-#include <limits.h>
-
-
 /*! \brief Return the corresponded hangup code of the given reason */
 static int convert_reason_to_hangup_code(const char* reason)
 {
@@ -2753,6 +2750,10 @@ void ast_ari_channels_transfer_progress(struct ast_variable *headers, struct ast
 
 
 #define RECORDING_FORK_DEFAULT_TIMEOUT_MS 3000
+/* pjproject Timer F ends an unanswered UDP transaction at 32s. A longer
+ * wait only pins the ARI HTTP worker after the SIP transaction is gone.
+ */
+#define RECORDING_FORK_MAX_TIMEOUT_MS 30000
 
 static int recording_fork_token_ok(const char *value)
 {
@@ -2870,10 +2871,10 @@ void ast_ari_channels_recording_fork(struct ast_variable *headers,
 				"heardPort must be an integer from 1 to 65535");
 			return;
 		}
-		rc = recording_fork_json_bounded(body, "timeoutMs", 1, INT_MAX, &timeout_ms);
+		rc = recording_fork_json_bounded(body, "timeoutMs", 1, RECORDING_FORK_MAX_TIMEOUT_MS, &timeout_ms);
 		if (rc < 0) {
 			ast_ari_response_error(response, 400, "Bad Request",
-				"timeoutMs must be a positive integer");
+				"timeoutMs must be an integer from 1 to 30000");
 			return;
 		}
 	} else {
