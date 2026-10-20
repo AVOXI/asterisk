@@ -26,26 +26,21 @@
  */
 
 #include "asterisk/ari.h"
+#include "asterisk/json.h"
 #include "asterisk/optional_api.h"
 
-/*! Fields already checked by the ARI handler. Strings remain valid for the call. */
-struct ast_recording_fork_params {
-	const char *channel_id;
-	int start;
-	const char *org_id;
-	const char *call_id;
-	const char *sent_host;
-	int sent_port;
-	const char *heard_host;
-	int heard_port;
-	const char *codec;
-	int timeout_ms;
-};
-
+/*!
+ * \brief Validate and send an in-dialog recording fork.
+ *
+ * The JSON body is the ARI request object. On failure the response is filled
+ * and no SIP message is sent. String pointers parsed from body remain valid
+ * only for this call.
+ */
 AST_OPTIONAL_API(void, ast_recording_fork_run,
-	(const struct ast_recording_fork_params *params, struct ast_ari_response *response),
+	(const char *channel_id, struct ast_json *body, struct ast_ari_response *response),
 	{
-		(void) params;
+		(void) channel_id;
+		(void) body;
 		ast_ari_response_error(response, 501, "Not Implemented",
 			"Recording fork requires res_pjsip_recording_fork");
 	});

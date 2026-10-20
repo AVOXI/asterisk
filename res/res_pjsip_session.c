@@ -4787,9 +4787,10 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 		break;
 	case PJSIP_EVENT_RX_MSG:
 		/*
-		 * Recording-fork MESSAGE stays on this dialog so it keeps the Call-ID
-		 * and CSeq, but it is not call signaling. Do not let supplements apply
-		 * a Reason header to the channel, and do not resend on 401/407/494.
+		 * A request marked suppress_session_side_effects stays on this dialog
+		 * so it keeps the Call-ID and CSeq, but it is not call signaling. Do
+		 * not let supplements apply a Reason header to the channel, and do
+		 * not resend on 401/407/494.
 		 */
 		if (tsx->last_tx && ast_sip_mod_data_get(tsx->last_tx->mod_data, id,
 				MOD_DATA_SUPPRESS_SIDE_EFFECTS)) {

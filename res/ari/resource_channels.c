@@ -45,8 +45,10 @@
 #include "asterisk/max_forwards.h"
 #include "asterisk/rtp_engine.h"
 #include "asterisk/websocket_client.h"
-#include "asterisk/channel.h"
 #include "resource_channels.h"
+
+#include <limits.h>
+
 #include "asterisk/recording_fork.h"
 
 /*! \brief Return the corresponded hangup code of the given reason */
@@ -2749,170 +2751,19 @@ void ast_ari_channels_transfer_progress(struct ast_variable *headers, struct ast
 }
 
 
-#define RECORDING_FORK_DEFAULT_TIMEOUT_MS 3000
-/* pjproject Timer F ends an unanswered UDP transaction at 32s. A longer
- * wait only pins the ARI HTTP worker after the SIP transaction is gone.
- */
-#define RECORDING_FORK_MAX_TIMEOUT_MS 30000
-
-static int recording_fork_token_ok(const char *value)
-{
-	if (ast_strlen_zero(value)) {
-		return 0;
-	}
-	if (strchr(value, ';') || strchr(value, '\r') || strchr(value, '\n')) {
-		return 0;
-	}
-	return 1;
-}
-
-static int recording_fork_port_ok(int port)
-{
-	return port > 0 && port <= 65535;
-}
-
-/* The wire field is host:port. A colon is the separator, so the host is an
- * IPv4 address or a hostname. An IPv6 literal cannot be encoded here.
- */
-static int recording_fork_host_ok(const char *value)
-{
-	if (!recording_fork_token_ok(value)) {
-		return 0;
-	}
-	return strchr(value, ':') == NULL;
-}
-
-static int recording_fork_json_string(struct ast_json *body, const char *name, const char **out)
-{
-	struct ast_json *field = ast_json_object_get(body, name);
-
-	if (!field) {
-		*out = NULL;
-		return 0;
-	}
-	if (ast_json_typeof(field) != AST_JSON_STRING) {
-		return -1;
-	}
-	*out = ast_json_string_get(field);
-	return 0;
-}
-
-/* Range-check the JSON integer before storing it in an int. Assigning
- * intmax_t straight into int wraps values such as 4294967297 to 1.
- * Returns 1 when stored, 0 when the field is absent, -1 when invalid.
- */
-static int recording_fork_json_bounded(struct ast_json *body, const char *name,
-	intmax_t min, intmax_t max, int *out)
-{
-	struct ast_json *field = ast_json_object_get(body, name);
-	intmax_t value;
-
-	if (!field) {
-		return 0;
-	}
-	if (ast_json_typeof(field) != AST_JSON_INTEGER) {
-		return -1;
-	}
-	value = ast_json_integer_get(field);
-	if (value < min || value > max) {
-		return -1;
-	}
-	*out = (int) value;
-	return 1;
-}
-
 void ast_ari_channels_recording_fork(struct ast_variable *headers,
 	struct ast_ari_channels_recording_fork_args *args,
 	struct ast_ari_response *response)
 {
 	RAII_VAR(struct stasis_app_control *, control, NULL, ao2_cleanup);
-	struct ast_recording_fork_params params;
-	const char *action = NULL;
-	const char *org_id = NULL;
-	const char *call_id = NULL;
-	const char *sent_host = NULL;
-	const char *heard_host = NULL;
-	const char *codec = NULL;
-	int sent_port = 0;
-	int heard_port = 0;
-	int timeout_ms = 0;
-	int start;
 
 	(void) headers;
 
+	/* Stasis membership stays here. Body checks and SIP live in the module. */
 	control = find_control(response, args->channel_id);
 	if (control == NULL) {
 		return;
 	}
 
-	if (args->request && ast_json_typeof(args->request) == AST_JSON_OBJECT) {
-		struct ast_json *body = args->request;
-		int rc;
-
-		if (recording_fork_json_string(body, "action", &action)
-			|| recording_fork_json_string(body, "orgId", &org_id)
-			|| recording_fork_json_string(body, "callId", &call_id)
-			|| recording_fork_json_string(body, "sentHost", &sent_host)
-			|| recording_fork_json_string(body, "heardHost", &heard_host)
-			|| recording_fork_json_string(body, "codec", &codec)) {
-			ast_ari_response_error(response, 400, "Bad Request",
-				"Recording fork string fields must be strings");
-			return;
-		}
-		rc = recording_fork_json_bounded(body, "sentPort", 1, 65535, &sent_port);
-		if (rc < 0) {
-			ast_ari_response_error(response, 400, "Bad Request",
-				"sentPort must be an integer from 1 to 65535");
-			return;
-		}
-		rc = recording_fork_json_bounded(body, "heardPort", 1, 65535, &heard_port);
-		if (rc < 0) {
-			ast_ari_response_error(response, 400, "Bad Request",
-				"heardPort must be an integer from 1 to 65535");
-			return;
-		}
-		rc = recording_fork_json_bounded(body, "timeoutMs", 1, RECORDING_FORK_MAX_TIMEOUT_MS, &timeout_ms);
-		if (rc < 0) {
-			ast_ari_response_error(response, 400, "Bad Request",
-				"timeoutMs must be an integer from 1 to 30000");
-			return;
-		}
-	} else {
-		ast_ari_response_error(response, 400, "Bad Request",
-			"Request body is required");
-		return;
-	}
-
-	if (!recording_fork_token_ok(action) || !recording_fork_token_ok(org_id)
-		|| !recording_fork_token_ok(call_id)) {
-		ast_ari_response_error(response, 400, "Bad Request",
-			"action, orgId, and callId are required");
-		return;
-	}
-	start = !strcasecmp(action, "start");
-	if (!start && strcasecmp(action, "stop")) {
-		ast_ari_response_error(response, 400, "Bad Request",
-			"action must be start or stop");
-		return;
-	}
-	if (start && (!recording_fork_host_ok(sent_host) || !recording_fork_host_ok(heard_host)
-		|| !recording_fork_token_ok(codec)
-		|| !recording_fork_port_ok(sent_port) || !recording_fork_port_ok(heard_port))) {
-		ast_ari_response_error(response, 400, "Bad Request",
-			"start requires IPv4 or hostname sentHost and heardHost, plus sentPort, heardPort, and codec");
-		return;
-	}
-
-	params.channel_id = args->channel_id;
-	params.start = start;
-	params.org_id = org_id;
-	params.call_id = call_id;
-	params.sent_host = sent_host;
-	params.sent_port = sent_port;
-	params.heard_host = heard_host;
-	params.heard_port = heard_port;
-	params.codec = codec;
-	params.timeout_ms = timeout_ms > 0 ? timeout_ms : RECORDING_FORK_DEFAULT_TIMEOUT_MS;
-
-	ast_recording_fork_run(&params, response);
+	ast_recording_fork_run(args->channel_id, args->request, response);
 }
